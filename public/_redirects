@@ -1,3 +1,0 @@
-# Cloudflare Pages / Cloudflare Workers SPA fallback
-# All routes that don't match a static asset fall back to index.html
-/*    /index.html   200
