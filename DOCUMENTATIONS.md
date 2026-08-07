@@ -52,14 +52,16 @@ The following pages exist in `src/pages` and must be backed by Supabase tables/A
   - Backend: none required for public content, but may show featured creators.
 
 - `/signin` Sign In (`src/pages/SignIn.jsx`)
-  - Purpose: Sign in users using Supabase magic link (email).
+  - Purpose: Sign in users using Supabase magic-link email authentication.
   - Backend: use `supabase.auth.signInWithOtp({ email })`.
-  - Role: signs in as `user` or creator depending on account metadata.
+  - UI: email-only input, not username; the app sends an authentication email to the provided address.
+  - Role: signs in as `user` or creator depending on account metadata and stored account state.
 
 - `/signup` Sign Up (`src/pages/SignUp.jsx`)
-  - Purpose: Sign up using Supabase magic link. No mobile number for `user` accounts.
+  - Purpose: Sign up using Supabase magic-link email authentication. No mobile number for `user` accounts.
   - Backend: `supabase.auth.signInWithOtp({ email })` for email verification; on successful callback finalize profile and assign role.
   - Expect `location.state.role` can be `'user'` (from shared links) or `'creator'` (default onboarding flow).
+  - UI: collects email and username, checks username availability before sending the auth email.
 
 - `/verify-otp` Verify OTP (`src/pages/VerifyOtp.jsx`) — deprecated
   - NOTE: OTP flows removed in favor of magic link. This page is kept for reference but production should use magic-link flows.

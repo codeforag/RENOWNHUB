@@ -5,7 +5,7 @@ import PageTransition from '../components/PageTransition.jsx'
 import TextField from '../components/TextField.jsx'
 import { useAuthFlow } from '../context/AuthFlowContext.jsx'
 import { checkUsernameAvailability } from '../lib/mockApi.js'
-import supabase from '../lib/supabaseClient.js'
+import { sendMagicLink } from '../lib/authClient.js'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const USERNAME_RE = /^[a-zA-Z0-9_.]{3,20}$/
@@ -75,15 +75,10 @@ export default function SignUp() {
     }
     if (hasError) return
 
-    if (!supabase) {
-      setError('Supabase not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.')
-      return
-    }
-
     setSubmitting(true)
     try {
-      // Use Supabase magic link for signup
-      await supabase.auth.signInWithOtp({ email })
+      await sendMagicLink({ email })
+      window.localStorage.setItem('mallucupid.lastAuthEmail', email)
       update({ flow: 'signup', signupEmail: email, signupUsername: username, signupRole: roleFromState })
       navigate('/check-email', { state: { email } })
     } catch (err) {
@@ -144,7 +139,7 @@ export default function SignUp() {
             disabled={submitting || usernameStatus === 'checking'}
             className="w-full rounded-full bg-gold text-bg font-semibold py-3.5 hover:bg-cream transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            {submitting ? 'Sending code…' : 'Continue'}
+            {submitting ? 'Sending email…' : 'Continue'}
           </button>
         </form>
 

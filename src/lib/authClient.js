@@ -14,6 +14,13 @@ export async function signUpUser({ email, password, username, role = 'user' }) {
   return data
 }
 
+export async function sendMagicLink({ email }) {
+  if (!supabase) throw new Error('Supabase not configured')
+  const { data, error } = await supabase.auth.signInWithOtp({ email })
+  if (error) throw error
+  return data
+}
+
 export async function signInUser({ email, password }) {
   if (!supabase) throw new Error('Supabase not configured')
   const { data, error } = await supabase.auth.signInWithPassword({ email, password })
