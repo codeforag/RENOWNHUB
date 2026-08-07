@@ -1,0 +1,28 @@
+project_id = "ycsssohaoedyyucldefb"
+
+[functions.send-otp]
+verify_jwt = false
+[functions.verify-otp]
+verify_jwt = false
+[functions.check-username]
+verify_jwt = false
+[functions.finalize-signup]
+verify_jwt = false
+[functions.create-post]
+verify_jwt = false
+[functions.get-posts]
+verify_jwt = false
+[functions.unlock-post]
+verify_jwt = false
+[functions.delete-post]
+verify_jwt = false
+[functions.verify-payment]
+verify_jwt = false
+[functions.create-razorpay-order]
+verify_jwt = false
+[functions.book-event]
+verify_jwt = false
+[functions.update-creator]
+verify_jwt = false
+[functions.create-event]
+verify_jwt = false

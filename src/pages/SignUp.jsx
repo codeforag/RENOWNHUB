@@ -6,6 +6,7 @@ import TextField from '../components/TextField.jsx'
 import OtpInput from '../components/OtpInput.jsx'
 import { useAuthFlow } from '../context/AuthFlowContext.jsx'
 import { checkUsernameAvailability, sendOtp, verifyOtp } from '../lib/edgeApi.js'
+import supabase from '../lib/supabaseClient.js'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const USERNAME_RE = /^[a-zA-Z0-9_.]{3,20}$/
@@ -22,7 +23,7 @@ function Spinner() {
 export default function SignUp() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { signupEmail, signupUsername, update } = useAuthFlow()
+  const { signupEmail, signupUsername, fullName, update } = useAuthFlow()
   const roleFromState = location.state?.role || 'creator'
 
   const [email, setEmail] = useState(signupEmail || location.state?.prefillEmail || '')
@@ -106,7 +107,7 @@ export default function SignUp() {
 
   async function handleVerifyOtp() {
     if (otp.length !== 6) {
-      setOtpError('Enter the 6-digit code')
+      setOtpError('Enter the 6-digit code from your email.')
       return
     }
     setVerifying(true)
@@ -114,11 +115,39 @@ export default function SignUp() {
     try {
       const result = await verifyOtp({ email, otp, purpose: 'signup' })
       if (result.success) {
-        // OTP verified, user created server-side
-        navigate('/onboarding/profile')
+        // ---- CRITICAL: persist the session so the user is actually logged in ----
+        if (result.access_token && result.refresh_token && supabase) {
+          const { error: sessionErr } = await supabase.auth.setSession({
+            access_token: result.access_token,
+            refresh_token: result.refresh_token,
+          })
+          if (sessionErr) {
+            console.error('setSession failed after signup:', sessionErr)
+            // Even if session set fails, we still navigate to onboarding (user can sign in)
+            setOtpError('Your account was created, but we could not sign you in automatically. Please sign in.')
+            return
+          }
+          // Refresh the AuthFlowContext so it picks up the logged-in user
+          update({
+            flow: 'signup',
+            signupEmail: email,
+            signupUsername: result.username || username,
+            signupRole: roleFromState,
+            fullName: fullName || '',
+          })
+        }
+        navigate('/onboarding/profile', {
+          state: {
+            role: result.role || roleFromState,
+            username: result.username || username,
+          },
+        })
+      } else {
+        setOtpError(result.message || 'Verification failed. Please try again.')
       }
     } catch (err) {
-      setOtpError(err.message || 'Verification failed')
+      console.error('signup verify error:', err)
+      setOtpError(err.message || 'Verification failed. Please check your code and try again.')
     } finally {
       setVerifying(false)
     }

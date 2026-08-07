@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import PageTransition from '../components/PageTransition.jsx'
+import supabase from '../lib/supabaseClient.js'
 import { createPost, getPosts, deletePost } from '../lib/edgeApi.js'
 
 export default function CreatorPosts() {
@@ -10,25 +11,58 @@ export default function CreatorPosts() {
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [message, setMessage] = useState('')
+  const [messageType, setMessageType] = useState('')
   const [caption, setCaption] = useState('')
   const [file, setFile] = useState(null)
   const [preview, setPreview] = useState(null)
   const [postType, setPostType] = useState('free')
   const [price, setPrice] = useState('')
+  const [creator, setCreator] = useState(null)
 
   useEffect(() => {
-    loadPosts()
-  }, [])
+    let mounted = true
+    ;(async () => {
+      if (!supabase) {
+        if (mounted) { setLoading(false); setMessage('Backend not configured.'); setMessageType('error') }
+        return
+      }
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) {
+          navigate('/signin', { replace: true, state: { redirect: '/dashboard/posts' } })
+          return
+        }
+        if (mounted) setCreator({ id: user.id })
+        await loadPosts(user.id)
+      } catch (err) {
+        console.error('CreatorPosts init error:', err)
+        if (mounted) {
+          setMessage(`Failed to load: ${err.message}`)
+          setMessageType('error')
+          setLoading(false)
+        }
+      }
+    })()
+    return () => { mounted = false }
+  }, [navigate])
 
-  async function loadPosts() {
+  async function loadPosts(creatorUserId) {
     try {
-      const data = await getPosts({ include_drafts: true })
+      // Pass creator_user_id so the edge function can filter; include_drafts=true so we see our own drafts
+      const data = await getPosts({ creator_user_id: creatorUserId, include_drafts: true })
       setPosts(data.posts || [])
-    } catch {
-      // empty state
+    } catch (err) {
+      console.error('loadPosts error:', err)
+      setMessage(`Failed to load posts: ${err.message}`)
+      setMessageType('error')
     } finally {
       setLoading(false)
     }
+  }
+
+  function flash(msg, type = 'info') {
+    setMessage(msg)
+    setMessageType(type)
   }
 
   function handleFileChange(e) {
@@ -43,12 +77,19 @@ export default function CreatorPosts() {
   async function handleUpload() {
     setMessage('')
     if (!caption.trim() && !file) {
-      setMessage('Add a caption or image')
+      flash('Add a caption or upload an image/video to publish a post.', 'error')
       return
     }
-    if (postType === 'paid' && (!price || parseFloat(price) <= 0)) {
-      setMessage('Set a valid price for paid posts')
-      return
+    if (postType === 'paid') {
+      const p = parseFloat(price)
+      if (isNaN(p) || p <= 0) {
+        flash('Set a valid price for paid posts (must be greater than ₹0).', 'error')
+        return
+      }
+      if (p < 1 || p > 10000) {
+        flash(`Price must be between ₹1 and ₹10,000 (you entered ₹${p}).`, 'error')
+        return
+      }
     }
 
     setUploading(true)
@@ -60,29 +101,32 @@ export default function CreatorPosts() {
       if (postType === 'paid') formData.append('price', price)
       if (file) formData.append('file', file)
 
-      await createPost(formData)
+      const result = await createPost(formData)
+      flash(result.message || 'Post published successfully!', 'success')
       setCaption('')
       setFile(null)
       setPreview(null)
       setPostType('free')
       setPrice('')
       if (fileRef.current) fileRef.current.value = ''
-      await loadPosts()
-      setMessage('Post uploaded!')
+      if (creator?.id) await loadPosts(creator.id)
     } catch (err) {
-      setMessage(err.message || 'Upload failed')
+      console.error('upload error:', err)
+      flash(`Upload failed: ${err.message}`, 'error')
     } finally {
       setUploading(false)
     }
   }
 
   async function handleDelete(postId) {
-    if (!confirm('Delete this post?')) return
+    if (!confirm('Delete this post? This cannot be undone. Anyone who unlocked it will lose access.')) return
     try {
-      await deletePost({ post_id: postId })
+      const result = await deletePost({ post_id: postId })
+      flash(result.message || 'Post deleted.', 'success')
       setPosts(prev => prev.filter(p => p.id !== postId))
     } catch (err) {
-      setMessage(err.message || 'Delete failed')
+      console.error('delete error:', err)
+      flash(`Delete failed: ${err.message}`, 'error')
     }
   }
 
@@ -180,7 +224,11 @@ export default function CreatorPosts() {
             </button>
 
             {message && (
-              <p className={`mt-3 text-center text-sm ${message.includes('failed') || message.includes('Failed') ? 'text-red-600' : 'text-emerald-600'}`}>{message}</p>
+              <p className={`mt-3 text-center text-sm ${
+                messageType === 'success' ? 'text-emerald-600' :
+                messageType === 'error' ? 'text-red-600' :
+                'text-slate-600'
+              }`}>{message}</p>
             )}
           </section>
 

@@ -48,13 +48,27 @@ export default function SignIn() {
     setSubmitting(true)
     setError('')
     try {
-      await sendOtp({ email, purpose: 'signin' })
+      const result = await sendOtp({ email, purpose: 'signin' })
       window.localStorage.setItem('mallucupid.lastAuthEmail', email)
       update({ flow: 'signin', identifier: email })
       setStep('otp')
       setResendTimer(60)
+      // Show the server's message briefly (e.g. "Check your spam folder")
+      setOtpError('')
     } catch (err) {
-      setError(err.message || 'Failed to send OTP')
+      console.error('send-otp error:', err)
+      // Specific guidance for common error codes
+      if (err.code === 'account_not_found') {
+        setError(err.message || 'No account found with this email. Please sign up first.')
+      } else if (err.code === 'rate_limited_per_email') {
+        setError(`Too many codes requested. Please wait ${err.retry_after_seconds || 120} seconds before trying again.`)
+      } else if (err.code === 'rate_limited_global') {
+        setError('Our email service is currently at capacity. Please try again in a few minutes.')
+      } else if (err.code === 'network_error') {
+        setError('Network error: could not reach the server. Check your connection and try again.')
+      } else {
+        setError(err.message || 'Failed to send verification code. Please try again.')
+      }
     } finally {
       setSubmitting(false)
     }
@@ -62,7 +76,7 @@ export default function SignIn() {
 
   async function handleVerifyOtp() {
     if (otp.length !== 6) {
-      setOtpError('Enter the 6-digit code')
+      setOtpError('Enter the 6-digit code from your email.')
       return
     }
     setVerifying(true)
@@ -72,10 +86,15 @@ export default function SignIn() {
       if (result.success) {
         // Set the Supabase session if tokens returned
         if (result.access_token && result.refresh_token) {
-          await supabase.auth.setSession({
+          const { error: sessionErr } = await supabase.auth.setSession({
             access_token: result.access_token,
             refresh_token: result.refresh_token,
           })
+          if (sessionErr) {
+            console.error('setSession failed:', sessionErr)
+            setOtpError('Signed in, but we could not persist your session. Please sign in again.')
+            return
+          }
         }
         // Redirect based on role or location state
         const redirect = location.state?.redirect
@@ -88,7 +107,16 @@ export default function SignIn() {
         }
       }
     } catch (err) {
-      setOtpError(err.message || 'Verification failed')
+      console.error('verify-otp error:', err)
+      if (err.code === 'otp_max_attempts') {
+        setOtpError(err.message || 'Too many incorrect attempts. Please request a new code.')
+      } else if (err.code === 'otp_not_found') {
+        setOtpError('This code is invalid or has expired. Please request a new code.')
+      } else if (err.code === 'session_exchange_failed') {
+        setOtpError(err.message || 'Could not create your session. Please try again.')
+      } else {
+        setOtpError(err.message || 'Verification failed. Please check your code and try again.')
+      }
     } finally {
       setVerifying(false)
     }
@@ -96,11 +124,19 @@ export default function SignIn() {
 
   async function handleResend() {
     if (resendTimer > 0) return
+    setError('')
+    setOtpError('')
     try {
       await sendOtp({ email, purpose: 'signin' })
       setResendTimer(60)
+      setOtpError('A new code has been sent. Check your inbox and spam folder.')
     } catch (err) {
-      setOtpError(err.message || 'Failed to resend')
+      console.error('resend error:', err)
+      if (err.code === 'rate_limited_per_email') {
+        setOtpError(`Too many codes requested. Please wait ${err.retry_after_seconds || 120} seconds.`)
+      } else {
+        setOtpError(err.message || 'Could not resend the code. Please try again in a moment.')
+      }
     }
   }
 

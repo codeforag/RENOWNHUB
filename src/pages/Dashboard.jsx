@@ -2,19 +2,18 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import PageTransition from '../components/PageTransition.jsx'
 import { useAuthFlow } from '../context/AuthFlowContext.jsx'
-import supabase from '../lib/supabaseClient.js'
 
 const STAT_CARDS = [
-  { label: 'EARNED', value: null },
-  { label: 'PAID', value: null },
-  { label: 'BALANCE', value: null },
+  { label: 'EARNED', value: '₹0' },
+  { label: 'PAID', value: '₹0' },
+  { label: 'BALANCE', value: '₹0' },
 ]
 
 const DETAIL_ITEMS = [
   { label: 'Pending Orders', value: '0' },
   { label: 'Amount', value: '₹ 0/-' },
   { label: 'Your last post was', value: 'NA.' },
-  { label: 'Your app has got', value: 'None visits so far' },
+  { label: 'Your app has got', value: '0 visits so far' },
   { label: "0 fans have enabled your app's push notification", value: '' },
 ]
 
@@ -26,56 +25,70 @@ const FOOTER_ITEMS = [
   { label: 'Profile', icon: 'M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z', route: '/dashboard/profile' },
 ]
 
-function displayName(fullName, signupUsername) {
+function displayName(fullName, signupUsername, sessionUser) {
   if (fullName) return fullName.split(' ')[0]
   if (signupUsername) return signupUsername
+  if (sessionUser?.email) return sessionUser.email.split('@')[0]
   return 'Creator'
 }
 
 export default function Dashboard() {
   const navigate = useNavigate()
-  const { fullName, signupUsername, update } = useAuthFlow()
+  const { fullName, signupUsername, session, user, authReady, signOut } = useAuthFlow()
   const [copied, setCopied] = useState(false)
+  const [signingOut, setSigningOut] = useState(false)
 
-  const name = displayName(fullName, signupUsername)
-  const shareUrl = useMemo(() => (signupUsername ? `https://creatorapp.club/${signupUsername}` : ''), [signupUsername])
+  const name = displayName(fullName, signupUsername, user)
+  const shareUrl = useMemo(
+    () => (signupUsername ? `https://renownhub.bzeadecommerce.workers.dev/u/${signupUsername}` : ''),
+    [signupUsername],
+  )
 
   useEffect(() => {
-    let mounted = true
-    ;(async () => {
-      if (!supabase) return
-      try {
-        const { data } = await supabase.auth.getUser()
-        const user = data?.user ?? null
-        if (!user && mounted) navigate('/signin', { replace: true })
-      } catch (e) {
-        if (mounted) navigate('/signin', { replace: true })
-      }
-    })()
-    return () => (mounted = false)
-  }, [navigate])
+    if (!authReady) return
+    if (!user) {
+      // Not signed in — redirect to sign in (preserve redirect)
+      navigate('/signin', { replace: true, state: { redirect: '/dashboard' } })
+      return
+    }
+  }, [authReady, user, navigate])
+
+  async function handleSignOut() {
+    setSigningOut(true)
+    try {
+      await signOut()
+      navigate('/signin', { replace: true })
+    } catch (err) {
+      console.error('signOut error:', err)
+      alert(`Sign out failed: ${err.message}`)
+    } finally {
+      setSigningOut(false)
+    }
+  }
 
   function copyLink() {
+    if (!shareUrl) return
     navigator.clipboard.writeText(shareUrl)
     setCopied(true)
     setTimeout(() => setCopied(false), 1800)
   }
 
-  function handleEditProfile() {
-    update({ fullName: fullName || '' })
-  }
-
-  if (!name || !shareUrl) {
+  // Wait for auth to be ready before rendering protected content
+  if (!authReady) {
     return (
       <PageTransition>
         <div className="min-h-screen bg-slate-100 flex items-center justify-center px-4">
           <div className="text-center">
             <div className="animate-spin h-8 w-8 border-4 border-violet-600 border-t-transparent rounded-full mx-auto mb-4" />
-            <p className="text-sm text-slate-500">Loading dashboard...</p>
+            <p className="text-sm text-slate-500">Loading your dashboard…</p>
           </div>
         </div>
       </PageTransition>
     )
+  }
+
+  if (!user) {
+    return null  // useEffect will redirect
   }
 
   return (
@@ -86,6 +99,7 @@ export default function Dashboard() {
             <button
               type="button"
               className="rounded-3xl bg-white p-3 shadow-sm ring-1 ring-slate-200"
+              aria-label="Menu"
             >
               <span className="block h-0.5 w-5 bg-slate-900 mb-1" />
               <span className="block h-0.5 w-5 bg-slate-900 mb-1" />
@@ -97,11 +111,15 @@ export default function Dashboard() {
               <span className="rounded-full bg-orange-500 px-3 py-2 text-[11px] font-semibold text-white">Inbox</span>
               <button
                 type="button"
-                className="rounded-3xl bg-white p-3 shadow-sm ring-1 ring-slate-200"
+                onClick={handleSignOut}
+                disabled={signingOut}
+                title="Sign out"
+                className="rounded-3xl bg-white p-3 shadow-sm ring-1 ring-slate-200 hover:bg-red-50 transition disabled:opacity-50"
               >
                 <svg viewBox="0 0 24 24" className="h-5 w-5 text-slate-900" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
-                  <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                  <polyline points="16 17 21 12 16 7" />
+                  <line x1="21" y1="12" x2="9" y2="12" />
                 </svg>
               </button>
             </div>
@@ -116,14 +134,15 @@ export default function Dashboard() {
             </ul>
             <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center">
               <div className="break-words rounded-3xl bg-slate-100 px-4 py-3 text-sm text-slate-700 ring-1 ring-slate-200">
-                {shareUrl}
+                {shareUrl || 'Set up your username to get your shareable link.'}
               </div>
               <button
                 type="button"
                 onClick={copyLink}
-                className="rounded-full bg-slate-900 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 transition"
+                disabled={!shareUrl}
+                className="rounded-full bg-slate-900 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 transition disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {copied ? 'Copied' : 'Copy Link'}
+                {copied ? 'Copied!' : 'Copy Link'}
               </button>
             </div>
           </section>
@@ -136,13 +155,12 @@ export default function Dashboard() {
                   <div className="h-16 w-16 rounded-full bg-slate-300" />
                   <div>
                     <div className="text-sm uppercase tracking-[0.35em] text-slate-700">{name.toUpperCase()}</div>
-                    <button
-                      type="button"
-                      onClick={handleEditProfile}
+                    <Link
+                      to="/dashboard/profile"
                       className="mt-1 text-sm font-semibold text-slate-800 underline-offset-4 hover:underline"
                     >
                       Edit Profile
-                    </button>
+                    </Link>
                   </div>
                 </div>
                 <div className="rounded-3xl bg-white/90 px-3 py-2 text-xs font-semibold text-slate-900">Live</div>
@@ -157,7 +175,7 @@ export default function Dashboard() {
                 ))}
               </div>
               <p className="mt-4 text-center text-xs uppercase tracking-[0.3em] text-slate-600">
-                Your next payout day is Sunday 2026-08-09
+                Your next payout day is Sunday
               </p>
             </div>
           </section>

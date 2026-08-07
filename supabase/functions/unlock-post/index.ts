@@ -1,280 +1,306 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { corsHeaders, handleCors } from "../_shared/cors.ts";
+import { requireUser, logActivity } from "../_shared/validation.ts";
 
-const RAZORPAY_KEY_ID = Deno.env.get("RAZORPAY_KEY_ID")!;
-const RAZORPAY_KEY_SECRET = Deno.env.get("RAZORPAY_KEY_SECRET")!;
+const RAZORPAY_KEY_ID = Deno.env.get("RAZORPAY_KEY_ID");
+const RAZORPAY_KEY_SECRET = Deno.env.get("RAZORPAY_KEY_SECRET");
 
 Deno.serve(async (req) => {
+  const origin = req.headers.get('Origin');
   const corsResp = handleCors(req);
   if (corsResp) return corsResp;
 
   try {
-    if (req.method === "POST") {
-      // === CREATE ORDER ===
-      return await handleCreateOrder(req);
-    }
-
-    if (req.method === "PUT") {
-      // === VERIFY PAYMENT ===
-      return await handleVerifyPayment(req);
-    }
-
-    return new Response(JSON.stringify({ error: "Method not allowed" }), {
-      status: 405,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    if (req.method === "POST") return await handleCreateOrder(req, origin);
+    if (req.method === "PUT") return await handleVerifyPayment(req, origin);
+    return new Response(JSON.stringify({ error: "Only POST (create order) or PUT (verify payment) is supported.", code: "method_not_allowed" }), {
+      status: 405, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
     });
   } catch (err) {
-    console.error("unlock-post error:", err);
-    return new Response(
-      JSON.stringify({ error: "Internal server error" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    const msg = err instanceof Error ? err.message : "Unknown";
+    console.error("unlock-post error:", msg);
+    return new Response(JSON.stringify({ error: `Server error: ${msg}. Please retry; if it persists, contact support with this message.`, code: "internal_error" }), {
+      status: 500, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+    });
+  }
+});
+
+// ============================================================
+// POST: CREATE RAZORPAY ORDER
+// ============================================================
+async function handleCreateOrder(req: Request, origin: string | null) {
+  const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+  const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
+
+  if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) {
+    return new Response(JSON.stringify({ error: "Payment gateway is not configured. Please contact support.", code: "razorpay_not_configured" }), {
+      status: 503, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+    });
+  }
+
+  const { user, error: authError } = await requireUser(req, SUPABASE_URL, ANON_KEY);
+  if (authError) return authError;
+
+  let body: any;
+  try { body = await req.json(); } catch {
+    return new Response(JSON.stringify({ error: "Request body must be valid JSON.", code: "bad_json" }), {
+      status: 400, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+    });
+  }
+
+  const { post_id } = body || {};
+  if (!post_id || typeof post_id !== "string") {
+    return new Response(JSON.stringify({ error: "post_id is required.", code: "missing_post_id" }), {
+      status: 400, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+    });
+  }
+
+  const supabase = createClient(SUPABASE_URL, SERVICE_ROLE);
+
+  // ---- VERIFY POST EXISTS, IS PAID, IS PUBLISHED ----
+  const { data: post, error: postErr } = await supabase
+    .from("posts")
+    .select("id, creator_user_id, creator_username, title, post_type, price, is_published")
+    .eq("id", post_id)
+    .maybeSingle();
+
+  if (postErr) {
+    console.error("post lookup error:", postErr);
+    return new Response(JSON.stringify({ error: `Failed to look up post: ${postErr.message}.`, code: "db_error" }), {
+      status: 500, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+    });
+  }
+  if (!post) {
+    return new Response(JSON.stringify({ error: "Post not found. It may have been deleted.", code: "post_not_found" }), {
+      status: 404, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+    });
+  }
+  if (post.post_type !== "paid") {
+    return new Response(JSON.stringify({ error: "This post is free — no payment needed.", code: "post_is_free", already_unlocked: true }), {
+      status: 200, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+    });
+  }
+  if (!post.is_published) {
+    return new Response(JSON.stringify({ error: "This post is not available.", code: "post_unavailable" }), {
+      status: 404, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+    });
+  }
+
+  // ---- CANNOT UNLOCK OWN POST ----
+  if (post.creator_user_id === user.id) {
+    return new Response(JSON.stringify({ error: "This is your own post — you don't need to unlock it.", code: "own_post", already_unlocked: true }), {
+      status: 200, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+    });
+  }
+
+  // ---- CHECK IF ALREADY UNLOCKED ----
+  const { data: existingUnlock } = await supabase
+    .from("post_unlocks")
+    .select("id, status")
+    .eq("post_id", post_id)
+    .eq("user_id", user.id)
+    .eq("status", "active")
+    .maybeSingle();
+
+  if (existingUnlock) {
+    return new Response(JSON.stringify({
+      success: true,
+      message: "You've already unlocked this post.",
+      already_unlocked: true,
+    }), { status: 200, headers: { ...corsHeaders(origin), "Content-Type": "application/json" } });
   }
 
   // ---- CREATE RAZORPAY ORDER ----
-  async function handleCreateOrder(req: Request) {
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const supabaseClient = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!
-    );
-
-    const { data: { user }, error: userError } = await supabaseClient.auth.getUser(
-      authHeader.replace("Bearer ", "")
-    );
-
-    if (userError || !user) {
-      return new Response(JSON.stringify({ error: "Invalid token" }), {
-        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const { post_id } = await req.json();
-
-    if (!post_id) {
-      return new Response(JSON.stringify({ error: "post_id is required" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
-
-    // Verify post exists, is paid, and is published
-    const { data: post, error: postError } = await supabase
-      .from("posts")
-      .select("id, creator_user_id, creator_username, title, post_type, price, is_published")
-      .eq("id", post_id)
-      .single();
-
-    if (postError || !post) {
-      return new Response(JSON.stringify({ error: "Post not found" }), {
-        status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    if (post.post_type !== "paid") {
-      return new Response(JSON.stringify({ error: "This post is free" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    if (!post.is_published) {
-      return new Response(JSON.stringify({ error: "Post not available" }), {
-        status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // Cannot unlock own post
-    if (post.creator_user_id === user.id) {
-      return new Response(JSON.stringify({ error: "Cannot unlock your own post" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // Check if already unlocked
-    const { data: existingUnlock } = await supabase
-      .from("post_unlocks")
-      .select("id, status")
-      .eq("post_id", post_id)
-      .eq("user_id", user.id)
-      .eq("status", "active")
-      .maybeSingle();
-
-    if (existingUnlock) {
-      return new Response(
-        JSON.stringify({ error: "You already unlocked this post", already_unlocked: true }),
-        { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    const amount = Number(post.price);
-    const receipt = `post_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
-
-    // Create Razorpay order
-    const authStr = btoa(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`);
-    const razorpayRes = await fetch("https://api.razorpay.com/v1/orders", {
-      method: "POST",
-      headers: { Authorization: `Basic ${authStr}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        amount: Math.round(amount * 100),
-        currency: "INR",
-        receipt,
-        notes: { post_id, user_id: user.id, creator_user_id: post.creator_user_id },
-      }),
+  const amount = Number(post.price);
+  if (amount <= 0) {
+    return new Response(JSON.stringify({ error: "Post price is invalid. Please contact the creator.", code: "invalid_price" }), {
+      status: 400, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
     });
+  }
 
-    if (!razorpayRes.ok) {
-      const errText = await razorpayRes.text();
-      console.error("Razorpay error:", errText);
-      return new Response(JSON.stringify({ error: "Payment gateway error" }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+  const receipt = `post_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+  const authStr = btoa(`${RAZORPAY_KEY_ID}:${RAZORPAY_KEY_SECRET}`);
 
-    const razorpayOrder = await razorpayRes.json();
-
-    return new Response(
-      JSON.stringify({
-        order_id: razorpayOrder.id,
-        amount: razorpayOrder.amount,
-        currency: razorpayOrder.currency,
-        key: RAZORPAY_KEY_ID,
+  const razorpayRes = await fetch("https://api.razorpay.com/v1/orders", {
+    method: "POST",
+    headers: { Authorization: `Basic ${authStr}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      amount: Math.round(amount * 100),
+      currency: "INR",
+      receipt,
+      notes: {
         post_id,
-        post_title: post.title,
-        creator_username: post.creator_username,
-      }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+        user_id: user.id,
+        creator_user_id: post.creator_user_id,
+        entity_type: "post_unlock",
+      },
+    }),
+  });
+
+  if (!razorpayRes.ok) {
+    const errBody = await razorpayRes.text();
+    console.error("Razorpay order create error:", razorpayRes.status, errBody);
+    let msg = "Payment gateway error.";
+    if (razorpayRes.status === 401) msg = "Payment gateway authentication failed. Please contact support.";
+    else if (razorpayRes.status === 429) msg = "Payment gateway rate limit reached. Please try again in a minute.";
+    return new Response(JSON.stringify({ error: msg, code: "razorpay_error", gateway_status: razorpayRes.status }), {
+      status: 502, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+    });
   }
 
-  // ---- VERIFY PAYMENT + CREATE UNLOCK ----
-  async function handleVerifyPayment(req: Request) {
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+  const razorpayOrder = await razorpayRes.json();
 
-    const supabaseClient = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!
-    );
+  return new Response(JSON.stringify({
+    success: true,
+    message: "Order created. Complete the payment to unlock this post.",
+    order_id: razorpayOrder.id,
+    amount: razorpayOrder.amount,
+    currency: razorpayOrder.currency,
+    key: RAZORPAY_KEY_ID,                  // Public key — safe to expose
+    post_id,
+    post_title: post.title,
+    creator_username: post.creator_username,
+    already_unlocked: false,
+  }), { status: 200, headers: { ...corsHeaders(origin), "Content-Type": "application/json" } });
+}
 
-    const { data: { user }, error: userError } = await supabaseClient.auth.getUser(
-      authHeader.replace("Bearer ", "")
-    );
+// ============================================================
+// PUT: VERIFY PAYMENT + CREATE UNLOCK
+// ============================================================
+async function handleVerifyPayment(req: Request, origin: string | null) {
+  const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+  const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 
-    if (userError || !user) {
-      return new Response(JSON.stringify({ error: "Invalid token" }), {
-        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+  const { user, error: authError } = await requireUser(req, SUPABASE_URL, ANON_KEY);
+  if (authError) return authError;
 
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, post_id } = await req.json();
-
-    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature || !post_id) {
-      return new Response(JSON.stringify({ error: "Missing payment details" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // HMAC-SHA256 verification
-    const keyBytes = new TextEncoder().encode(RAZORPAY_KEY_SECRET);
-    const dataBytes = new TextEncoder().encode(`${razorpay_order_id}|${razorpay_payment_id}`);
-    const hashBuffer = await crypto.subtle.importKey(
-      "raw", keyBytes, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
-    );
-    const signatureBuffer = await crypto.subtle.sign("HMAC", hashBuffer, dataBytes);
-    const expectedSig = Array.from(new Uint8Array(signatureBuffer))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
-
-    if (expectedSig !== razorpay_signature) {
-      return new Response(JSON.stringify({ error: "Invalid payment signature" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
-
-    // Get post info
-    const { data: post } = await supabase
-      .from("posts")
-      .select("id, creator_user_id, price")
-      .eq("id", post_id)
-      .single();
-
-    if (!post) {
-      return new Response(JSON.stringify({ error: "Post not found" }), {
-        status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // Create unlock record
-    const { error: unlockError } = await supabase.from("post_unlocks").insert({
-      post_id,
-      user_id: user.id,
-      creator_user_id: post.creator_user_id,
-      amount: Number(post.price),
-      currency: "INR",
-      razorpay_order_id,
-      razorpay_payment_id,
-      razorpay_signature,
-      status: "active",
+  let body: any;
+  try { body = await req.json(); } catch {
+    return new Response(JSON.stringify({ error: "Request body must be valid JSON.", code: "bad_json" }), {
+      status: 400, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
     });
-
-    if (unlockError) {
-      console.error("Unlock insert error:", unlockError);
-      // Check for duplicate
-      if (unlockError.code === "23505") {
-        return new Response(
-          JSON.stringify({ success: true, message: "Post already unlocked" }),
-          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      return new Response(JSON.stringify({ error: "Failed to unlock post" }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // Increment unlocks_count on the post
-    await supabase.rpc("handle_updated_at"); // no-op, just in case
-    await supabase
-      .from("posts")
-      .update({ unlocks_count: supabase.rpc ? 0 : 0 }) // handled by trigger
-      .eq("id", post_id);
-
-    // Create payment record
-    await supabase.from("payments").insert({
-      user_id: user.id,
-      creator_user_id: post.creator_user_id,
-      amount: Number(post.price),
-      currency: "INR",
-      razorpay_order_id,
-      razorpay_payment_id,
-      razorpay_signature,
-      status: "captured",
-      entity_type: "post_unlock",
-      entity_id: post_id,
-    });
-
-    return new Response(
-      JSON.stringify({ success: true, message: "Post unlocked successfully" }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
   }
-});
+
+  const { razorpay_order_id, razorpay_payment_id, razorpay_signature, post_id } = body || {};
+
+  if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature || !post_id) {
+    return new Response(JSON.stringify({ error: "Missing payment details (order_id, payment_id, signature, post_id are all required).", code: "missing_payment_fields" }), {
+      status: 400, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+    });
+  }
+
+  // ---- HMAC-SHA256 SIGNATURE VERIFICATION ----
+  // Razorpay signs `${order_id}|${payment_id}` with the key secret.
+  const keyBytes = new TextEncoder().encode(RAZORPAY_KEY_SECRET);
+  const dataBytes = new TextEncoder().encode(`${razorpay_order_id}|${razorpay_payment_id}`);
+  const hmacKey = await crypto.subtle.importKey(
+    "raw", keyBytes, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+  );
+  const sigBuffer = await crypto.subtle.sign("HMAC", hmacKey, dataBytes);
+  const expectedSig = Array.from(new Uint8Array(sigBuffer))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+
+  if (expectedSig !== razorpay_signature) {
+    console.error("Signature mismatch. Expected:", expectedSig.slice(0, 16) + "...", "Got:", razorpay_signature.slice(0, 16) + "...");
+    return new Response(JSON.stringify({ error: "Payment signature verification failed. The payment may have been tampered with. If you were charged, please contact support with your order ID.", code: "invalid_signature" }), {
+      status: 400, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+    });
+  }
+
+  const supabase = createClient(SUPABASE_URL, SERVICE_ROLE);
+
+  // ---- GET POST INFO ----
+  const { data: post, error: postErr } = await supabase
+    .from("posts")
+    .select("id, creator_user_id, creator_username, title, price")
+    .eq("id", post_id)
+    .maybeSingle();
+
+  if (postErr || !post) {
+    return new Response(JSON.stringify({ error: "Post not found. It may have been deleted.", code: "post_not_found" }), {
+      status: 404, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+    });
+  }
+
+  // ---- ALREADY UNLOCKED? (idempotent) ----
+  const { data: existingUnlock } = await supabase
+    .from("post_unlocks")
+    .select("id")
+    .eq("post_id", post_id)
+    .eq("user_id", user.id)
+    .eq("status", "active")
+    .maybeSingle();
+  if (existingUnlock) {
+    return new Response(JSON.stringify({ success: true, message: "Post already unlocked.", already_unlocked: true }), {
+      status: 200, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+    });
+  }
+
+  // ---- INSERT UNLOCK RECORD ----
+  const { error: unlockError } = await supabase.from("post_unlocks").insert({
+    post_id,
+    user_id: user.id,
+    creator_user_id: post.creator_user_id,
+    amount: Number(post.price),
+    currency: "INR",
+    razorpay_order_id,
+    razorpay_payment_id,
+    razorpay_signature,
+    status: "active",
+  });
+
+  if (unlockError) {
+    console.error("unlock insert error:", unlockError);
+    if (unlockError.code === "23505") {
+      // unique constraint — already unlocked
+      return new Response(JSON.stringify({ success: true, message: "Post already unlocked.", already_unlocked: true }), {
+        status: 200, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+      });
+    }
+    return new Response(JSON.stringify({ error: `Failed to unlock post: ${unlockError.message}. If you were charged, please contact support with order ID ${razorpay_order_id}.`, code: "unlock_insert_failed" }), {
+      status: 500, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
+    });
+  }
+
+  // ---- INCREMENT unlocks_count (atomic RPC) ----
+  const { error: incrErr } = await supabase.rpc("increment_unlocks_count", { post_uuid: post_id });
+  if (incrErr) {
+    console.warn("increment_unlocks_count failed (non-fatal):", incrErr);
+  }
+
+  // ---- CREATE PAYMENT RECORD ----
+  const { error: payErr } = await supabase.from("payments").insert({
+    user_id: user.id,
+    creator_user_id: post.creator_user_id,
+    amount: Number(post.price),
+    currency: "INR",
+    razorpay_order_id,
+    razorpay_payment_id,
+    razorpay_signature,
+    status: "captured",
+    entity_type: "post_unlock",     // ✓ now allowed by the CHECK constraint
+    entity_id: post_id,
+  });
+  if (payErr) {
+    console.warn("payment insert failed (non-fatal):", payErr);
+  }
+
+  await logActivity(supabase, {
+    user_id: user.id,
+    action: "post_unlocked",
+    entity_type: "post",
+    entity_id: post_id,
+    metadata: { amount: Number(post.price), razorpay_order_id, razorpay_payment_id },
+    req,
+  });
+
+  return new Response(JSON.stringify({
+    success: true,
+    message: "Payment verified and post unlocked. Enjoy the content!",
+    already_unlocked: false,
+  }), { status: 200, headers: { ...corsHeaders(origin), "Content-Type": "application/json" } });
+}
