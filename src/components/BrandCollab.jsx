@@ -32,7 +32,7 @@ const brandChips = [
   'Wanderlust Travel',
   'Fitbyte',
   'Cedar & Co.',
-  'Lumen Gaming',
+  'MALLU CUPID Gaming',
   'Verve Audio',
   'Petal Studio',
   'Alt Coffee',

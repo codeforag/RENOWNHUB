@@ -1,29 +1,53 @@
 // Mock backend calls. Swap these for real API requests once the backend
 // exists — every function returns a Promise so the call sites don't change.
 
-const RESERVED_USERNAMES = ['admin', 'test', 'lumen', 'root', 'support', 'help']
+import supabase from './supabaseClient.js'
 
-/** Simulates a debounced server-side username availability check. */
-export function checkUsernameAvailability(username) {
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      const taken = RESERVED_USERNAMES.includes(username.toLowerCase())
-      resolve({ available: !taken })
-    }, 600)
-  })
+/**
+ * Production-ready backend helpers. These functions require a configured
+ * Supabase client via `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
+ *
+ * NOTE: All mock/demo fallbacks have been removed. If Supabase is not
+ * configured these functions will throw — this ensures the app is not
+ * running against demo data in production.
+ */
+
+if (!supabase) {
+  const missing = new Error(
+    'Supabase not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.'
+  )
+  missing.name = 'SupabaseNotConfigured'
+  throw missing
 }
 
-/** Simulates sending a 6-digit OTP to an email/phone. */
-export function sendOtp(identifier) {
-  console.info(`[mock] OTP sent to ${identifier}. Demo code: 123456`)
-  return new Promise((resolve) => setTimeout(() => resolve({ sent: true }), 400))
+export async function checkUsernameAvailability(username) {
+  const name = (username || '').toLowerCase()
+  const { data, error } = await supabase
+    .from('users')
+    .select('username')
+    .ilike('username', name)
+    .limit(1)
+
+  if (error) throw error
+  return { available: !data || data.length === 0 }
 }
 
-/** Simulates verifying the OTP. Demo code "123456" always succeeds. */
-export function verifyOtp(identifier, code) {
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      resolve({ valid: code === '123456' })
-    }, 500)
-  })
+export async function isReservedUsername(name) {
+  const { data, error } = await supabase
+    .from('reserved_usernames')
+    .select('username')
+    .ilike('username', name)
+    .limit(1)
+  if (error) throw error
+  return data && data.length > 0
 }
+
+export async function fetchSomeMockData() {
+  // Keep a simple health check helper that reads app_health
+  const { data, error } = await supabase.from('app_health').select('ok').limit(1)
+  if (error) throw error
+  return data?.[0] ?? { ok: true }
+}
+
+// OTP flows and demo SMS have been removed. Use Supabase auth (magic link)
+// or implement your preferred SMS provider in a server-side function.

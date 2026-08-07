@@ -27,7 +27,7 @@ export default function WhoFor() {
           </h2>
           <p className="text-muted text-lg max-w-md">
             It doesn't matter which platform grew your audience. If you've
-            got a following that pays attention, Lumen turns it into
+            got a following that pays attention, MALLU CUPID turns it into
             something you can build a career on.
           </p>
         </motion.div>

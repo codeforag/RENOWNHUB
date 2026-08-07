@@ -4,7 +4,7 @@ export default function Footer() {
       <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
         <div className="flex items-center gap-2 font-display text-lg">
           <span className="inline-block h-2 w-2 rounded-full bg-gold" />
-          Lumen
+          MALLU CUPID
         </div>
         <div className="flex flex-wrap gap-x-8 gap-y-2 text-sm text-muted">
           <a href="#" className="hover:text-cream transition-colors">
@@ -21,7 +21,7 @@ export default function Footer() {
           </a>
         </div>
         <div className="text-xs text-muted/60 font-mono">
-          © 2026 Lumen. All rights reserved.
+          © 2026 MALLU CUPID. All rights reserved.
         </div>
       </div>
     </footer>

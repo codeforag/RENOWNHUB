@@ -21,7 +21,7 @@ export default function PassCard() {
           <div className="flex items-start justify-between">
             <div>
               <div className="font-mono text-[10px] tracking-[0.3em] text-gold uppercase mb-1">
-                Lumen Access
+                MALLU CUPID Access
               </div>
               <div className="font-display text-2xl">Creator Pass</div>
             </div>

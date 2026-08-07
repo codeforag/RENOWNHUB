@@ -3,7 +3,7 @@ import { motion } from 'framer-motion'
 
 /**
  * Shared chrome for every sign-in / sign-up / onboarding screen:
- * the spotlight backdrop, the Lumen logo, an optional back button,
+ * the spotlight backdrop, the MALLU CUPID logo, an optional back button,
  * and an optional step indicator for multi-step flows.
  */
 export default function AuthLayout({
@@ -38,7 +38,7 @@ export default function AuthLayout({
       <div className="relative w-full flex items-center justify-between max-w-5xl mb-10">
         <Link to="/" className="flex items-center gap-2 font-display text-xl tracking-tight">
           <span className="inline-block h-2.5 w-2.5 rounded-full bg-gold shadow-glow animate-pulse-glow" />
-          Lumen
+          MALLU CUPID
         </Link>
 
         {step && (

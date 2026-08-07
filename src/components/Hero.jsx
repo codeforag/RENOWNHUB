@@ -74,7 +74,7 @@ export default function Hero() {
             transition={{ delay: 0.4, duration: 0.7 }}
             className="text-muted text-lg max-w-md mb-10"
           >
-            Lumen gives creators the stage, the tools and the fans to build a
+            MALLU CUPID gives creators the stage, the tools and the fans to build a
             real career out of what they already love making.
           </motion.p>
 

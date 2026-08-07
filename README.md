@@ -1,4 +1,4 @@
-# Lumen — Creator Platform
+# MALLU CUPID — Creator Platform
 
 React + Vite, Tailwind CSS, Framer Motion, React Router. A creator-monetization
 landing page plus a full sign-in / sign-up / OTP / onboarding flow with
@@ -25,7 +25,7 @@ npm run preview
 | `/` | Landing page |
 | `/signin` | Sign in with email or username |
 | `/signup` | Create an account (email + username, with live availability check) |
-| `/verify-otp?flow=signin\|signup&identifier=...` | 6-digit OTP, 60s resend timer |
+| `/check-email` | Interstitial page instructing users to check email for magic link |
 | `/onboarding/profile` | Full name, gender, date of birth (18+ required) |
 | `/onboarding/category` | "What defines you best?" — up to 3 category cards |
 | `/onboarding/social` | Optional social profile links, with format validation |
@@ -35,18 +35,60 @@ Each onboarding step redirects back to the appropriate earlier step if
 visited directly out of order (e.g. hitting `/onboarding/social` before
 `/onboarding/profile` is complete bounces you back).
 
-## Backend is mocked
+## Backend
 
-There's no real backend wired up yet — `src/lib/mockApi.js` simulates:
+This project is production-ready to integrate with Supabase. Configure the following environment variables in AWS Amplify Console or your local `.env`:
 
-- **Username availability** — `admin`, `test`, `lumen`, `root`, `support`,
-  `help` are "taken"; anything else is "available" after a short delay.
-- **OTP send/verify** — any request "sends" an OTP; the demo code that
-  verifies successfully is **`123456`**. Any other 6 digits shows the
-  "incorrect code" error state so you can see that path too.
+- `VITE_SUPABASE_URL` — your Supabase project URL
+- `VITE_SUPABASE_ANON_KEY` — your Supabase anon/public key
 
-Swap the functions in `mockApi.js` for real API calls — none of the call
-sites need to change, since they already just `await` a promise.
+The app uses Supabase for authentication (magic link), user profiles, creator profiles, live events, bookings, memberships, and app state. See `DOCUMENTATIONS.md` for full schema and migration SQL.
+## Production backend (Supabase) and deployment
+
+This project can be connected to Supabase for Auth, Database and Storage. Below are recommended steps and the minimal database schema required for persisting per-user app state and reserved usernames.
+
+Environment variables (set in AWS Amplify or local `.env`):
+
+- `VITE_SUPABASE_URL` — your Supabase project URL
+- `VITE_SUPABASE_ANON_KEY` — your Supabase anon/public key
+
+Database schema (run in Supabase SQL editor)
+
+```sql
+-- Persist per-user app state
+create table if not exists app_user_state (
+  user_id uuid primary key,
+  state jsonb,
+  updated_at timestamptz default now()
+);
+
+-- Optional: reserved usernames
+create table if not exists reserved_usernames (
+  id uuid primary key default gen_random_uuid(),
+  username text unique not null
+);
+
+-- Optional: small health check table
+create table if not exists app_health (
+  id integer primary key default 1,
+  ok boolean default true
+);
+```
+
+Deployment
+
+- Frontend: Deploy to AWS Amplify. Set environment variables in Amplify Console: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`. Connect repository and enable auto-deploy on pushes to `main`.
+- Domain: Configure `mallucupid.com` DNS and add the domain in Amplify hosting settings.
+
+Notes
+
+- This repo includes a `src/lib/supabaseClient.js` file that reads `VITE_SUPABASE_*` env vars and exports a client. No secret keys are committed.
+- After deploying, create the DB tables above in your Supabase project. The app will persist per-user state to `app_user_state` when users are authenticated.
+- For production, consider using Row Level Security (RLS) policies to restrict access to user-specific rows.
+
+If you want, I can create a tiny migration script and example Amplify build settings next.
+
+Note: This repository is configured for production use with Supabase. All demo OTP flows have been removed. Authentication is handled via Supabase magic links.
 
 ## State across the flow
 
@@ -73,12 +115,12 @@ src/
   context/
     AuthFlowContext.jsx   in-memory + sessionStorage flow state
   lib/
-    mockApi.js             mock username check / OTP send / OTP verify
+    mockApi.js             Supabase-backed helpers for username checks and health
   pages/
     Home.jsx                the landing page
     SignIn.jsx
     SignUp.jsx
-    VerifyOtp.jsx
+    VerifyOtp.jsx (informational — app uses magic links)
     Dashboard.jsx
     onboarding/
       ProfileStep.jsx

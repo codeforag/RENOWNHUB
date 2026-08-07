@@ -11,8 +11,8 @@ function displayName(fullName, signupUsername) {
 }
 
 const SOCIAL_FIELDS = [
-  { key: 'instagram', label: 'Instagram username', placeholder: 'I_SHIK_AA', icon: 'instagram' },
-  { key: 'snapchat', label: 'Snapchat handle', placeholder: '@abcd1234', icon: 'snapchat' },
+  { key: 'instagram', label: 'Instagram username', placeholder: 'your_instagram', icon: 'instagram' },
+  { key: 'snapchat', label: 'Snapchat handle', placeholder: '@yourhandle', icon: 'snapchat' },
   { key: 'x', label: 'Twitter handle', placeholder: '@abcd1234', icon: 'twitter' },
   { key: 'youtube', label: 'Youtube channel', placeholder: 'https://www.youtube.com/channel/channelId', icon: 'youtube' },
   { key: 'facebook', label: 'Facebook profile', placeholder: 'https://www.facebook.com/username', icon: 'facebook' },
@@ -105,6 +105,27 @@ export default function DashboardProfile() {
             </div>
           </section>
 
+          <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:justify-center">
+            <Link
+              to="/preview"
+              className="rounded-full bg-violet-600 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-violet-700 transition"
+            >
+              Preview app
+            </Link>
+            <Link
+              to="/share"
+              className="rounded-full bg-slate-100 border border-slate-200 px-6 py-3 text-sm font-semibold text-slate-900 shadow-sm hover:bg-slate-200 transition"
+            >
+              Share
+            </Link>
+            <Link
+              to="/dashboard/connect"
+              className="rounded-full bg-slate-100 border border-slate-200 px-6 py-3 text-sm font-semibold text-slate-900 shadow-sm hover:bg-slate-200 transition"
+            >
+              Edit
+            </Link>
+          </div>
+
           <form onSubmit={handleSubmit} className="space-y-5 rounded-[2rem] bg-white p-5 shadow-sm ring-1 ring-slate-200">
             <div>
               <label className="block text-sm font-semibold text-slate-900 mb-2">Display Name</label>
@@ -112,7 +133,7 @@ export default function DashboardProfile() {
                 value={displayNameValue}
                 onChange={(e) => setDisplayNameValue(e.target.value)}
                 className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-100"
-                placeholder="ISHIKA"
+                placeholder=""
               />
             </div>
 

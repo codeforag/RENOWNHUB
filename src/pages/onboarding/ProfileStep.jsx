@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import supabase from '../../lib/supabaseClient.js'
 import AuthLayout from '../../components/AuthLayout.jsx'
 import PageTransition from '../../components/PageTransition.jsx'
 import TextField from '../../components/TextField.jsx'
@@ -20,16 +21,29 @@ function calculateAge(dobString) {
 
 export default function ProfileStep() {
   const navigate = useNavigate()
-  const { otpVerified, fullName, gender, dob, update } = useAuthFlow()
+  const { fullName, gender, dob, update } = useAuthFlow()
+
+  useEffect(() => {
+    let mounted = true
+    ;(async () => {
+      if (!supabase) return
+      try {
+        const { data } = await supabase.auth.getUser()
+        const user = data?.user ?? null
+        if (!user && mounted) navigate('/signup', { replace: true })
+      } catch (e) {
+        if (mounted) navigate('/signup', { replace: true })
+      }
+    })()
+    return () => (mounted = false)
+  }, [navigate])
 
   const [name, setName] = useState(fullName || '')
   const [selectedGender, setSelectedGender] = useState(gender || '')
   const [dobValue, setDobValue] = useState(dob || '')
   const [errors, setErrors] = useState({})
 
-  useEffect(() => {
-    if (!otpVerified) navigate('/signup', { replace: true })
-  }, [otpVerified, navigate])
+  
 
   function handleSubmit(e) {
     e.preventDefault()
@@ -48,7 +62,7 @@ export default function ProfileStep() {
       if (Number.isNaN(age)) {
         nextErrors.dob = 'Enter a valid date.'
       } else if (age < 18) {
-        nextErrors.dob = 'You must be 18 or older to create a Lumen account.'
+        nextErrors.dob = 'You must be 18 or older to create a MALLU CUPID account.'
       } else if (age > 100) {
         nextErrors.dob = 'Enter a valid date of birth.'
       }
@@ -69,7 +83,7 @@ export default function ProfileStep() {
         step={{ current: 1, total: 3 }}
         eyebrow="Tell us about you"
         title="Set up your profile"
-        subtitle="This helps fans recognize you and keeps Lumen a safe space for creators."
+        subtitle="This helps fans recognize you and keeps MALLU CUPID a safe space for creators."
       >
         <form onSubmit={handleSubmit} noValidate className="space-y-6">
           <TextField
@@ -109,7 +123,7 @@ export default function ProfileStep() {
             onChange={(e) => setDobValue(e.target.value)}
             error={errors.dob}
             max={new Date().toISOString().split('T')[0]}
-            hint={!errors.dob ? 'You must be 18 or older to join Lumen.' : undefined}
+            hint={!errors.dob ? 'You must be 18 or older to join MALLU CUPID.' : undefined}
           />
 
           <button

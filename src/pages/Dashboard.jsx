@@ -2,11 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import PageTransition from '../components/PageTransition.jsx'
 import { useAuthFlow } from '../context/AuthFlowContext.jsx'
+import supabase from '../lib/supabaseClient.js'
 
 const STAT_CARDS = [
-  { label: 'EARNED', value: '₹ 0' },
-  { label: 'PAID', value: '₹ 0' },
-  { label: 'BALANCE', value: '₹ 0' },
+  { label: 'EARNED', value: null },
+  { label: 'PAID', value: null },
+  { label: 'BALANCE', value: null },
 ]
 
 const DETAIL_ITEMS = [
@@ -33,19 +34,27 @@ function displayName(fullName, signupUsername) {
 
 export default function Dashboard() {
   const navigate = useNavigate()
-  const { otpVerified, fullName, signupUsername, update } = useAuthFlow()
+  const { fullName, signupUsername, update } = useAuthFlow()
   const [isMobile, setIsMobile] = useState(true)
   const [copied, setCopied] = useState(false)
 
   const name = displayName(fullName, signupUsername)
-  const shareUrl = useMemo(
-    () => `https://creatorapp.club/${signupUsername || 'yourname'}`,
-    [signupUsername],
-  )
+  const shareUrl = useMemo(() => (signupUsername ? `https://creatorapp.club/${signupUsername}` : ''), [signupUsername])
 
   useEffect(() => {
-    if (!otpVerified) navigate('/signin', { replace: true })
-  }, [otpVerified, navigate])
+    let mounted = true
+    ;(async () => {
+      if (!supabase) return
+      try {
+        const { data } = await supabase.auth.getUser()
+        const user = data?.user ?? null
+        if (!user && mounted) navigate('/signin', { replace: true })
+      } catch (e) {
+        if (mounted) navigate('/signin', { replace: true })
+      }
+    })()
+    return () => (mounted = false)
+  }, [navigate])
 
   useEffect(() => {
     const media = window.matchMedia('(max-width: 768px)')
@@ -67,7 +76,7 @@ export default function Dashboard() {
   }
 
   function handleEditProfile() {
-    update({ fullName: fullName || 'Ishika' })
+    update({ fullName: fullName || '' })
   }
 
   if (!isMobile) {

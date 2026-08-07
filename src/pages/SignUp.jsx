@@ -4,7 +4,8 @@ import AuthLayout from '../components/AuthLayout.jsx'
 import PageTransition from '../components/PageTransition.jsx'
 import TextField from '../components/TextField.jsx'
 import { useAuthFlow } from '../context/AuthFlowContext.jsx'
-import { checkUsernameAvailability, sendOtp } from '../lib/mockApi.js'
+import { checkUsernameAvailability } from '../lib/mockApi.js'
+import supabase from '../lib/supabaseClient.js'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const USERNAME_RE = /^[a-zA-Z0-9_.]{3,20}$/
@@ -22,6 +23,7 @@ export default function SignUp() {
   const navigate = useNavigate()
   const location = useLocation()
   const { update } = useAuthFlow()
+  const roleFromState = location.state?.role || 'creator'
 
   const [email, setEmail] = useState(location.state?.prefillEmail || '')
   const [emailError, setEmailError] = useState('')
@@ -73,11 +75,22 @@ export default function SignUp() {
     }
     if (hasError) return
 
+    if (!supabase) {
+      setError('Supabase not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.')
+      return
+    }
+
     setSubmitting(true)
-    await sendOtp(email)
-    update({ flow: 'signup', signupEmail: email, signupUsername: username })
-    setSubmitting(false)
-    navigate(`/verify-otp?flow=signup&identifier=${encodeURIComponent(email)}`)
+    try {
+      // Use Supabase magic link for signup
+      await supabase.auth.signInWithOtp({ email })
+      update({ flow: 'signup', signupEmail: email, signupUsername: username, signupRole: roleFromState })
+      navigate('/check-email', { state: { email } })
+    } catch (err) {
+      setError(err.message || 'Signup failed')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   const usernameTrailing =
@@ -94,7 +107,7 @@ export default function SignUp() {
       <AuthLayout
         showBack
         backTo="/"
-        eyebrow="Join Lumen"
+        eyebrow="Join MALLU CUPID"
         title="Create your account"
         subtitle="Free forever. Set up your creator page in minutes."
       >
@@ -120,7 +133,7 @@ export default function SignUp() {
             error={usernameStatus === 'taken' ? 'That username is already taken.' : usernameError}
             hint={
               usernameStatus === 'idle' && !usernameError
-                ? 'This becomes your Lumen page link.'
+                ? 'This becomes your MALLU CUPID page link.'
                 : undefined
             }
             trailing={usernameTrailing}
