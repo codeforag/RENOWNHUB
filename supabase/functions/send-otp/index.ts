@@ -47,8 +47,14 @@ Deno.serve(async (req) => {
       });
     }
 
-    // If signup with username, validate server-side too
-    if (purpose === "signup" && username) {
+    // Username is required for signup
+    if (purpose === "signup") {
+      if (!username || typeof username !== "string") {
+        return new Response(
+          JSON.stringify({ error: "Username is required for signup" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
       const usernameRegex = /^[a-zA-Z0-9_.]{3,20}$/;
       if (!usernameRegex.test(username)) {
         return new Response(

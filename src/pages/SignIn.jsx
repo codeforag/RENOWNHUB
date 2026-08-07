@@ -19,8 +19,8 @@ function validateEmail(value) {
 export default function SignIn() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { update } = useAuthFlow()
-  const [email, setEmail] = useState('')
+  const { identifier, update } = useAuthFlow()
+  const [email, setEmail] = useState(identifier || '')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 

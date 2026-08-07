@@ -24,6 +24,31 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Email regex validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (typeof email !== "string" || !emailRegex.test(email.toLowerCase())) {
+      return new Response(JSON.stringify({ error: "Invalid email format" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Purpose must be 'signin' or 'signup'
+    if (!["signin", "signup"].includes(purpose)) {
+      return new Response(JSON.stringify({ error: "Invalid purpose" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // OTP must be a string type check
+    if (typeof otp !== "string") {
+      return new Response(JSON.stringify({ error: "OTP must be a string" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     if (!/^\d{6}$/.test(otp)) {
       return new Response(JSON.stringify({ error: "OTP must be 6 digits" }), {
         status: 400,
@@ -36,8 +61,12 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    // Clean expired OTPs first
-    await supabase.rpc("clean_expired_otps");
+    // Clean expired OTPs first (non-fatal if RPC missing)
+    try {
+      await supabase.rpc("clean_expired_otps");
+    } catch {
+      // Non-fatal: continue even if the RPC doesn't exist
+    }
 
     // Find valid OTP
     const { data: otpRecord, error: otpError } = await supabase
@@ -59,7 +88,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Check attempt limit
+    // Check attempt limit BEFORE incrementing
     if (otpRecord.attempts >= otpRecord.max_attempts) {
       await supabase
         .from("otp_verifications")
@@ -77,13 +106,7 @@ Deno.serve(async (req) => {
       .update({ attempts: otpRecord.attempts + 1 })
       .eq("id", otpRecord.id);
 
-    // If OTP doesn't match (extra safety check)
-    if (otpRecord.otp_code !== otp) {
-      return new Response(JSON.stringify({ error: "Invalid OTP" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    // (Removed dead code: OTP match check after query already matched)
 
     // Mark OTP as verified
     await supabase
@@ -114,7 +137,7 @@ Deno.serve(async (req) => {
       if (authError) {
         console.error("Auth signup error:", authError);
         return new Response(
-          JSON.stringify({ error: "Failed to create account: " + authError.message }),
+          JSON.stringify({ error: "Failed to create account. Please try again." }),
           { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
@@ -152,7 +175,7 @@ Deno.serve(async (req) => {
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     } else {
-      // Signin: verify the user exists, create a session
+      // Signin: verify the user exists, create a real session
       const { data: existingUser } = await supabase
         .from("users")
         .select("user_id, role, username")
@@ -166,7 +189,7 @@ Deno.serve(async (req) => {
         );
       }
 
-      // Generate a new session via Supabase admin
+      // Generate a magic link to obtain a token_hash, then exchange for a real session
       const { data: adminData, error: adminError } = await supabase.auth.admin.generateLink({
         type: "magiclink",
         email: email.toLowerCase(),
@@ -174,16 +197,48 @@ Deno.serve(async (req) => {
 
       if (adminError || !adminData) {
         console.error("Generate link error:", adminError);
-        // Fallback: just return success and let frontend handle session recovery
         return new Response(
-          JSON.stringify({
-            success: true,
-            message: "OTP verified",
-            role: existingUser.role,
-            username: existingUser.username,
-            user_id: existingUser.user_id,
-          }),
-          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          JSON.stringify({ error: "Failed to create session. Please try again." }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Extract token_hash from the action_link URL
+      const actionLink = adminData.action_link;
+      let tokenHash: string | null = null;
+      try {
+        const url = new URL(actionLink);
+        tokenHash = url.hash.slice(1); // Remove leading '#'
+      } catch {
+        // Fallback: try to extract token_hash from query params or hash
+        const match = actionLink.match(/token_hash=([^&]+)/);
+        if (match) tokenHash = match[1];
+      }
+
+      if (!tokenHash) {
+        console.error("Could not extract token_hash from action_link:", actionLink);
+        return new Response(
+          JSON.stringify({ error: "Failed to create session. Please try again." }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Exchange token_hash for a real session using the anon client
+      const supabaseAnon = createClient(
+        Deno.env.get("SUPABASE_URL")!,
+        Deno.env.get("SUPABASE_ANON_KEY")!
+      );
+
+      const { data: sessionData, error: sessionError } = await supabaseAnon.auth.verifyOtp({
+        token_hash: tokenHash,
+        type: "magiclink",
+      });
+
+      if (sessionError || !sessionData.session) {
+        console.error("Session exchange error:", sessionError);
+        return new Response(
+          JSON.stringify({ error: "Failed to create session. Please try again." }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
 
@@ -194,7 +249,8 @@ Deno.serve(async (req) => {
           role: existingUser.role,
           username: existingUser.username,
           user_id: existingUser.user_id,
-          action_link: adminData.action_link,
+          access_token: sessionData.session.access_token,
+          refresh_token: sessionData.session.refresh_token,
         }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );

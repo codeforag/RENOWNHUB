@@ -22,12 +22,12 @@ function Spinner() {
 export default function SignUp() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { update } = useAuthFlow()
+  const { signupEmail, signupUsername, update } = useAuthFlow()
   const roleFromState = location.state?.role || 'creator'
 
-  const [email, setEmail] = useState(location.state?.prefillEmail || '')
+  const [email, setEmail] = useState(signupEmail || location.state?.prefillEmail || '')
   const [emailError, setEmailError] = useState('')
-  const [username, setUsername] = useState('')
+  const [username, setUsername] = useState(signupUsername || '')
   const [usernameError, setUsernameError] = useState('')
   const [usernameStatus, setUsernameStatus] = useState('idle')
   const debounceRef = useRef(null)

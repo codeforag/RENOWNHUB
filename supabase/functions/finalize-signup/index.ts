@@ -49,7 +49,8 @@ Deno.serve(async (req) => {
       });
     }
 
-    if (gender && !["female", "male", "non-binary", "prefer_not_to_say"].includes(gender)) {
+    // Accept both "prefer not to say" (with spaces) and "prefer_not_to_say" (with underscores)
+    if (gender && !["female", "male", "non-binary", "prefer_not_to_say", "prefer not to say"].includes(gender)) {
       return new Response(JSON.stringify({ error: "Invalid gender value" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -82,12 +83,15 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
+    // Normalize gender: convert spaces to underscores before storing
+    const normalizedGender = gender ? gender.replace(/ /g, "_") : null;
+
     // Update users table
     const { error: userUpdateError } = await supabase
       .from("users")
       .update({
         display_name: fullName.trim(),
-        gender: gender || null,
+        gender: normalizedGender,
         dob: dob || null,
       })
       .eq("user_id", user.id);
@@ -125,7 +129,7 @@ Deno.serve(async (req) => {
     // Persist app state
     const statePayload = {
       fullName: fullName.trim(),
-      gender: gender || null,
+      gender: normalizedGender,
       dob: dob || null,
       categories: categories || [],
       socials: socials || {},

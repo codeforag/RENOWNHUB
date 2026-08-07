@@ -81,6 +81,7 @@ export default function SocialStep() {
   })
   const [errors, setErrors] = useState({})
   const [submitting, setSubmitting] = useState(false)
+  const [finalizeError, setFinalizeError] = useState('')
 
   function handleChange(key, value) {
     setValues((prev) => ({ ...prev, [key]: value }))
@@ -107,6 +108,7 @@ export default function SocialStep() {
     if (Object.keys(nextErrors).length > 0) return
 
     setSubmitting(true)
+    setFinalizeError('')
     update({ socials: normalized })
 
     // Finalize signup on server: save all onboarding data
@@ -118,12 +120,13 @@ export default function SocialStep() {
         categories: categories || [],
         socials: normalized,
       })
+      navigate('/dashboard')
     } catch (err) {
       console.error('Failed to finalize on server:', err)
-      // Still navigate — data is saved in context as fallback
+      setFinalizeError(err.message || 'Failed to save profile. Please try again.')
+    } finally {
+      setSubmitting(false)
     }
-
-    navigate('/dashboard')
   }
 
   return (
@@ -137,6 +140,12 @@ export default function SocialStep() {
         subtitle="Optional, but pages with linked socials get discovered faster. Leave any of these blank."
         width="max-w-xl"
       >
+        {finalizeError && (
+          <div className="rounded-lg bg-red-500/10 border border-red-500/30 px-4 py-3 text-sm text-red-400">
+            {finalizeError}
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} noValidate className="space-y-5">
           <div className="grid sm:grid-cols-2 gap-5">
             {FIELDS.map((field) => (
