@@ -14,14 +14,23 @@ export default function TextField({
       <div className="relative">
         <input
           {...inputProps}
-          className={`w-full rounded-xl bg-bg border px-4 py-3 text-sm text-cream placeholder:text-muted/60 focus:outline-none transition-colors ${
+          className={`auth-input w-full rounded-xl bg-bg border px-4 py-3 text-sm text-cream placeholder:text-muted/60 focus:outline-none transition-colors ${
             error
-              ? 'border-coral/70 focus:border-coral'
+              ? 'border-coral focus:border-coral'
               : 'border-white/15 focus:border-gold/60'
-          } ${trailing ? 'pr-10' : ''} ${className}`}
+          } ${trailing ? 'pr-16' : ''} ${className}`}
         />
         {trailing && (
           <span className="absolute right-3 top-1/2 -translate-y-1/2">{trailing}</span>
+        )}
+        {error && !trailing && (
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-coral">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <circle cx="8" cy="8" r="7" stroke="currentColor" strokeWidth="1.2" />
+              <path d="M8 4.5v3.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+              <circle cx="8" cy="10.5" r="0.75" fill="currentColor" />
+            </svg>
+          </span>
         )}
       </div>
       {error ? (

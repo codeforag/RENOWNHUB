@@ -159,11 +159,11 @@ export default function SignIn() {
       >
         <form onSubmit={handleSendOtp} noValidate className="space-y-6">
           <TextField
-              label="Email address"
-              type="email"
-              placeholder="you@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+            label="Email address"
+            type="email"
+            placeholder="you@example.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
             error={error}
             autoFocus
           />

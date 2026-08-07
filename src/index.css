@@ -88,6 +88,20 @@ body {
   text-wrap: balance;
 }
 
+/* Force dark background on autofilled inputs — browsers override with white/light */
+.auth-input:-webkit-autofill,
+.auth-input:-webkit-autofill:hover,
+.auth-input:-webkit-autofill:focus,
+.auth-input:autofill,
+.auth-input:autofill:hover,
+.auth-input:autofill:focus {
+  -webkit-text-fill-color: #f7f3ed;
+  -webkit-box-shadow: 0 0 0px 1000px #15111F inset;
+  box-shadow: 0 0 0px 1000px #15111F inset;
+  transition: background-color 5000s ease-in-out 0s;
+  caret-color: #f7f3ed;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

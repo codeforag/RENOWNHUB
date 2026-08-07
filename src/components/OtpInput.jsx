@@ -44,7 +44,7 @@ export default function OtpInput({ value, onChange, length = 6, error = false })
     e.preventDefault()
     const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, length)
     if (!pasted) return
-    onChange(pasted.padEnd(value.length, '').slice(0, length))
+    onChange(pasted.padEnd(length, '').slice(0, length))
     const nextIndex = Math.min(pasted.length, length - 1)
     refs.current[nextIndex]?.focus()
   }

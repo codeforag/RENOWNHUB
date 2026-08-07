@@ -22,9 +22,24 @@ async function callEdge(name, options = {}) {
   }
 
   const res = await fetch(url, { ...options, headers })
-  const data = await res.json()
+
+  // Safely parse response — never expose raw JSON errors to users
+  let data
+  try {
+    const text = await res.text()
+    if (!text) {
+      throw new Error('Server returned an empty response. Please try again.')
+    }
+    data = JSON.parse(text)
+  } catch (parseErr) {
+    const friendly = parseErr.message
+    throw new Error(friendly.includes('JSON')
+      ? 'Something went wrong. Please check your connection and try again.'
+      : friendly)
+  }
+
   if (!res.ok) {
-    const err = new Error(data.error || `Edge function ${name} failed`)
+    const err = new Error(data.error || data.message || `Request failed (${res.status})`)
     err.status = res.status
     throw err
   }
@@ -134,9 +149,18 @@ export async function createPost(formData) {
     }
   }
   const res = await fetch(url, { method: 'POST', headers, body: formData })
-  const data = await res.json()
+  let data
+  try {
+    const text = await res.text()
+    if (!text) throw new Error('Server returned an empty response. Please try again.')
+    data = JSON.parse(text)
+  } catch (parseErr) {
+    throw new Error(parseErr.message.includes('JSON')
+      ? 'Something went wrong. Please check your connection and try again.'
+      : parseErr.message)
+  }
   if (!res.ok) {
-    const err = new Error(data.error || 'Failed to create post')
+    const err = new Error(data.error || data.message || 'Failed to create post')
     err.status = res.status
     throw err
   }
