@@ -22,5 +22,8 @@ supabase/.temp/
 .DS_Store
 Thumbs.db
 
+# Wrangler
+.wrangler/
+
 # Debug
 npm-debug.log*

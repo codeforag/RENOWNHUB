@@ -35,7 +35,6 @@ function displayName(fullName, signupUsername) {
 export default function Dashboard() {
   const navigate = useNavigate()
   const { fullName, signupUsername, update } = useAuthFlow()
-  const [isMobile, setIsMobile] = useState(true)
   const [copied, setCopied] = useState(false)
 
   const name = displayName(fullName, signupUsername)
@@ -56,17 +55,6 @@ export default function Dashboard() {
     return () => (mounted = false)
   }, [navigate])
 
-  useEffect(() => {
-    const media = window.matchMedia('(max-width: 768px)')
-    const updateIsMobile = (event) => {
-      setIsMobile(event.matches)
-    }
-
-    setIsMobile(media.matches)
-    media.addEventListener('change', updateIsMobile)
-    return () => media.removeEventListener('change', updateIsMobile)
-  }, [])
-
   function copyLink() {
     navigator.clipboard.writeText(shareUrl)
     setCopied(true)
@@ -77,22 +65,13 @@ export default function Dashboard() {
     update({ fullName: fullName || '' })
   }
 
-  if (!isMobile) {
+  if (!name || !shareUrl) {
     return (
       <PageTransition>
-        <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center px-4">
-          <div className="max-w-md w-full rounded-3xl bg-white/95 p-8 shadow-2xl text-slate-900">
-            <h1 className="text-2xl font-semibold mb-3">Dashboard only works on mobile display</h1>
-            <p className="text-sm text-slate-600 mb-6">
-              Please open this page on a mobile device or in a narrow browser window to continue.
-            </p>
-            <button
-              type="button"
-              onClick={() => window.location.reload()}
-              className="inline-flex items-center justify-center rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-slate-800"
-            >
-              Reload in mobile view
-            </button>
+        <div className="min-h-screen bg-slate-100 flex items-center justify-center px-4">
+          <div className="text-center">
+            <div className="animate-spin h-8 w-8 border-4 border-violet-600 border-t-transparent rounded-full mx-auto mb-4" />
+            <p className="text-sm text-slate-500">Loading dashboard...</p>
           </div>
         </div>
       </PageTransition>
@@ -102,7 +81,7 @@ export default function Dashboard() {
   return (
     <PageTransition>
       <div className="min-h-screen bg-slate-100 text-slate-900 pb-28">
-        <div className="max-w-md mx-auto px-4 py-4">
+        <div className="max-w-2xl mx-auto px-4 py-4 md:py-8">
           <header className="mb-4 flex items-center justify-between">
             <button
               type="button"
