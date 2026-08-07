@@ -19,11 +19,11 @@ const DETAIL_ITEMS = [
 ]
 
 const FOOTER_ITEMS = [
-  { label: 'Home', icon: 'M3 12h3m12 0h3M12 3v3m0 12v3' },
-  { label: 'Feed', icon: 'M4 7h16M4 12h16M4 17h16' },
-  { label: 'Post', icon: 'M12 5v14M5 12h14' },
-  { label: 'Notifications', icon: 'M15 17h5l-1.405-1.405A2.032 2.032 0 0 1 18 14.158V11a6 6 0 1 0-12 0v3.159c0 .538-.214 1.055-.595 1.436L4 17h5' },
-  { label: 'Profile', icon: 'M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z' },
+  { label: 'Home', icon: 'M3 12h3m12 0h3M12 3v3m0 12v3', route: '/dashboard' },
+  { label: 'Feed', icon: 'M4 7h16M4 12h16M4 17h16', route: null },
+  { label: 'Post', icon: 'M12 5v14M5 12h14', route: '/dashboard/posts' },
+  { label: 'Notifications', icon: 'M15 17h5l-1.405-1.405A2.032 2.032 0 0 1 18 14.158V11a6 6 0 1 0-12 0v3.159c0 .538-.214 1.055-.595 1.436L4 17h5', route: null },
+  { label: 'Profile', icon: 'M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z', route: '/dashboard/profile' },
 ]
 
 function displayName(fullName, signupUsername) {
@@ -202,7 +202,7 @@ export default function Dashboard() {
         <nav className="fixed inset-x-0 bottom-0 z-10 border-t border-slate-200 bg-white/95 backdrop-blur-xl py-3">
           <div className="mx-auto flex max-w-md items-center justify-between px-4 text-slate-600">
             {FOOTER_ITEMS.map((item) => (
-              <button key={item.label} type="button" className="inline-flex flex-col items-center gap-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-600">
+              <button key={item.label} type="button" onClick={() => item.route && navigate(item.route)} className="inline-flex flex-col items-center gap-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-600 hover:text-violet-600 transition">
                 <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d={item.icon} />
                 </svg>

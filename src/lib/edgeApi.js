@@ -117,3 +117,76 @@ export async function updateCreatorProfile(updates) {
     body: JSON.stringify(updates),
   })
 }
+
+/**
+ * Create a post (supports FormData for file uploads).
+ * Requires auth token.
+ * @param {FormData} formData - caption, title, content_type, post_type, price, file
+ */
+export async function createPost(formData) {
+  const url = `${SUPABASE_URL}/functions/v1/create-post`
+  const headers = {}
+  const { default: supabase } = await import('./supabaseClient.js')
+  if (supabase) {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session?.access_token) {
+      headers['Authorization'] = `Bearer ${session.access_token}`
+    }
+  }
+  const res = await fetch(url, { method: 'POST', headers, body: formData })
+  const data = await res.json()
+  if (!res.ok) {
+    const err = new Error(data.error || 'Failed to create post')
+    err.status = res.status
+    throw err
+  }
+  return data
+}
+
+/**
+ * Get posts for a creator (public).
+ * @param {{ username?: string, creator_user_id?: string, include_drafts?: boolean, page?: number }} params
+ */
+export async function getPosts({ username, creator_user_id, include_drafts = false, page = 1 } = {}) {
+  const params = new URLSearchParams()
+  if (username) params.set('username', username)
+  if (creator_user_id) params.set('creator_user_id', creator_user_id)
+  if (include_drafts) params.set('include_drafts', 'true')
+  params.set('page', String(page))
+  return callEdge(`get-posts?${params.toString()}`, { method: 'GET' })
+}
+
+/**
+ * Create a Razorpay order to unlock a paid post.
+ * Requires auth token.
+ * @param {{ post_id: string }} params
+ */
+export async function createPostUnlockOrder({ post_id }) {
+  return callEdge('unlock-post', {
+    method: 'POST',
+    body: JSON.stringify({ post_id }),
+  })
+}
+
+/**
+ * Verify payment and unlock a post.
+ * Requires auth token.
+ */
+export async function verifyPostUnlock({ razorpay_order_id, razorpay_payment_id, razorpay_signature, post_id }) {
+  return callEdge('unlock-post', {
+    method: 'PUT',
+    body: JSON.stringify({ razorpay_order_id, razorpay_payment_id, razorpay_signature, post_id }),
+  })
+}
+
+/**
+ * Delete a post. Only the creator can delete their own posts.
+ * Requires auth token.
+ * @param {{ post_id: string }} params
+ */
+export async function deletePost({ post_id }) {
+  return callEdge('delete-post', {
+    method: 'DELETE',
+    body: JSON.stringify({ post_id }),
+  })
+}

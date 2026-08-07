@@ -12,6 +12,7 @@ import Dashboard from './pages/Dashboard.jsx'
 import DashboardProfile from './pages/DashboardProfile.jsx'
 import ConnectWithMeEdit from './pages/ConnectWithMeEdit.jsx'
 import MembershipEdit from './pages/MembershipEdit.jsx'
+import CreatorPosts from './pages/CreatorPosts.jsx'
 import PreviewApp from './pages/PreviewApp.jsx'
 import ShareApp from './pages/ShareApp.jsx'
 import PublicCreator from './pages/PublicCreator.jsx'
@@ -35,6 +36,7 @@ export default function App() {
           <Route path="/dashboard/profile" element={<DashboardProfile />} />
           <Route path="/dashboard/connect" element={<ConnectWithMeEdit />} />
           <Route path="/dashboard/membership" element={<MembershipEdit />} />
+          <Route path="/dashboard/posts" element={<CreatorPosts />} />
           <Route path="/preview" element={<PreviewApp />} />
           <Route path="/share" element={<ShareApp />} />
           <Route path="/u/:username" element={<PublicCreator />} />
