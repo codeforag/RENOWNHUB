@@ -119,13 +119,35 @@ async function callEdge(name, options = {}) {
 /**
  * Send 6-digit OTP to email via server-side Resend.
  * Rate limited server-side: 5 per 10 minutes per email, 500 per hour globally.
- * @param {{ email: string, purpose: 'signin'|'signup', role?: string, username?: string }}
+ *
+ * For signup purpose, acceptedTerms and acceptedAge MUST be `true` (boolean),
+ * otherwise the server rejects with terms_not_accepted / age_not_confirmed.
+ *
+ * @param {{
+ *   email: string,
+ *   purpose: 'signin'|'signup',
+ *   role?: string,
+ *   username?: string,
+ *   acceptedTerms?: boolean,
+ *   acceptedAge?: boolean,
+ * }} params
  */
-export async function sendOtp({ email, purpose = 'signin', role, username }) {
+export async function sendOtp({ email, purpose = 'signin', role, username, acceptedTerms, acceptedAge }) {
   if (!email) throw new Error('Email address is required to send a verification code.')
+  // Coerce to actual booleans (in case a form sends "true" string or undefined)
+  const payload = {
+    email,
+    purpose,
+    role,
+    username,
+  }
+  if (purpose === 'signup') {
+    payload.acceptedTerms = acceptedTerms === true
+    payload.acceptedAge = acceptedAge === true
+  }
   return callEdge('send-otp', {
     method: 'POST',
-    body: JSON.stringify({ email, purpose, role, username }),
+    body: JSON.stringify(payload),
   })
 }
 
