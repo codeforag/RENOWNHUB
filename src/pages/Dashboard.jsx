@@ -60,11 +60,9 @@ export default function Dashboard() {
     const media = window.matchMedia('(max-width: 768px)')
     const updateIsMobile = (event) => {
       setIsMobile(event.matches)
-      if (!event.matches) debugger
     }
 
     setIsMobile(media.matches)
-    if (!media.matches) debugger
     media.addEventListener('change', updateIsMobile)
     return () => media.removeEventListener('change', updateIsMobile)
   }, [])

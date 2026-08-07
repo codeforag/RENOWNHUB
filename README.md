@@ -23,72 +23,63 @@ npm run preview
 | Route | Purpose |
 |---|---|
 | `/` | Landing page |
-| `/signin` | Sign in with email or username |
-| `/signup` | Create an account (email + username, with live availability check) |
-| `/check-email` | Interstitial page instructing users to check email for magic link |
+| `/signin` | Sign in with 6-digit email OTP |
+| `/signup` | Create an account (email + username, 6-digit OTP verification) |
 | `/onboarding/profile` | Full name, gender, date of birth (18+ required) |
 | `/onboarding/category` | "What defines you best?" — up to 3 category cards |
 | `/onboarding/social` | Optional social profile links, with format validation |
-| `/dashboard` | Landing spot after sign-in or completed onboarding |
+| `/dashboard` | Creator dashboard (mobile) |
+| `/dashboard/profile` | Edit creator profile |
+| `/dashboard/connect` | Manage "Connect with Me" services |
+| `/dashboard/membership` | Manage membership tiers & subscribers |
+| `/u/:username` | Public creator page |
 
-Each onboarding step redirects back to the appropriate earlier step if
-visited directly out of order (e.g. hitting `/onboarding/social` before
-`/onboarding/profile` is complete bounces you back).
+## Deployment — Cloudflare Pages
 
-## Backend
+### 1. Push to GitHub
 
-This project is production-ready to integrate with Supabase. Configure the following environment variables in AWS Amplify Console or your local `.env`:
-
-- `VITE_SUPABASE_URL` — your Supabase project URL
-- `VITE_SUPABASE_ANON_KEY` — your Supabase anon/public key
-
-The app uses Supabase for authentication (magic link), user profiles, creator profiles, live events, bookings, memberships, and app state. See `DOCUMENTATIONS.md` for full schema and migration SQL.
-## Production backend (Supabase) and deployment
-
-This project can be connected to Supabase for Auth, Database and Storage. Below are recommended steps and the minimal database schema required for persisting per-user app state and reserved usernames.
-
-Environment variables (set in AWS Amplify or local `.env`):
-
-- `VITE_SUPABASE_URL` — your Supabase project URL
-- `VITE_SUPABASE_ANON_KEY` — your Supabase anon/public key
-
-Database schema (run in Supabase SQL editor)
-
-```sql
--- Persist per-user app state
-create table if not exists app_user_state (
-  user_id uuid primary key,
-  state jsonb,
-  updated_at timestamptz default now()
-);
-
--- Optional: reserved usernames
-create table if not exists reserved_usernames (
-  id uuid primary key default gen_random_uuid(),
-  username text unique not null
-);
-
--- Optional: small health check table
-create table if not exists app_health (
-  id integer primary key default 1,
-  ok boolean default true
-);
+```bash
+git init && git add -A && git commit -m "initial"
+git remote add origin <your-github-repo-url>
+git push -u origin main
 ```
 
-Deployment
+### 2. Connect to Cloudflare Pages
 
-- Frontend: Deploy to AWS Amplify. Set environment variables in Amplify Console: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`. Connect repository and enable auto-deploy on pushes to `main`.
-- Domain: Configure `mallucupid.com` DNS and add the domain in Amplify hosting settings.
+1. Go to **Cloudflare Dashboard** → **Workers & Pages** → **Create** → **Pages** → **Connect to Git**
+2. Select your GitHub repository
+3. Configure build settings:
+   - **Framework preset:** `None`
+   - **Build command:** `npm run build`
+   - **Build output directory:** `dist`
+4. Add environment variables:
+   - `VITE_SUPABASE_URL` = your Supabase project URL
+   - `VITE_SUPABASE_ANON_KEY` = your Supabase anon/public key
+5. Click **Save and Deploy**
 
-Notes
+### 3. Custom Domain
 
-- This repo includes a `src/lib/supabaseClient.js` file that reads `VITE_SUPABASE_*` env vars and exports a client. No secret keys are committed.
-- After deploying, create the DB tables above in your Supabase project. The app will persist per-user state to `app_user_state` when users are authenticated.
-- For production, consider using Row Level Security (RLS) policies to restrict access to user-specific rows.
+In Cloudflare Pages → **Custom domains** → add `mallucupid.com`.
+Since the domain is already on Cloudflare, it will auto-provision SSL.
 
-If you want, I can create a tiny migration script and example Amplify build settings next.
+## Backend (Supabase)
 
-Note: This repository is configured for production use with Supabase. All demo OTP flows have been removed. Authentication is handled via Supabase magic links.
+Environment variables (set in Cloudflare Pages settings or local `.env`):
+
+- `VITE_SUPABASE_URL` — your Supabase project URL
+- `VITE_SUPABASE_ANON_KEY` — your Supabase anon/public key
+
+The app uses Supabase Edge Functions for all backend operations:
+- **Auth:** 6-digit email OTP via Resend (server-side only)
+- **Username check:** Server-side availability validation
+- **Payments:** Razorpay order creation + webhook verification
+- **Bookings:** Server-side validation with capacity & double-booking prevention
+- **Profiles:** Server-side creator profile updates
+
+All secrets (Resend API key, Razorpay keys, service role key) are stored in
+Supabase Edge Function environment — **never exposed to the frontend**.
+
+See `DOCUMENTATIONS.md` for full schema, RLS policies, and edge function details.
 
 ## State across the flow
 
@@ -113,19 +104,35 @@ src/
                      OtpInput, TextField, PageTransition, and the landing
                      page sections
   context/
-    AuthFlowContext.jsx   in-memory + sessionStorage flow state
+    AuthFlowContext.jsx   in-memory + sessionStorage + Supabase flow state
   lib/
-    mockApi.js             Supabase-backed helpers for username checks and health
+    edgeApi.js            Edge function client (all backend calls)
+    supabaseClient.js     Supabase client singleton
+    mockApi.js             Re-exports from edgeApi.js
   pages/
     Home.jsx                the landing page
-    SignIn.jsx
-    SignUp.jsx
-    VerifyOtp.jsx (informational — app uses magic links)
-    Dashboard.jsx
+    SignIn.jsx              6-digit OTP sign-in
+    SignUp.jsx              6-digit OTP sign-up with username check
+    Dashboard.jsx           Creator dashboard
+    PublicCreator.jsx       Public creator page (/u/:username)
     onboarding/
       ProfileStep.jsx
       CategoryStep.jsx
       SocialStep.jsx
   App.jsx             route table + animated transitions
   main.jsx            BrowserRouter + AuthFlowProvider + App
+supabase/
+  functions/           Edge Functions (Deno, deployed to Supabase)
+    send-otp/             6-digit OTP via Resend
+    verify-otp/           OTP verification + user creation
+    check-username/       Server-side username availability
+    finalize-signup/      Save onboarding data
+    create-razorpay-order/ Razorpay order creation
+    verify-payment/       Razorpay payment verification
+    book-event/           Free event booking
+    update-creator/       Creator profile updates
+  migrations/           SQL migration files
+public/
+  _redirects            Cloudflare Pages SPA routing
+  _headers              Security headers
 ```

@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useNavigate, useSearchParams } from 'react-router-dom'
 import PageTransition from '../components/PageTransition.jsx'
 import { useAuthFlow } from '../context/AuthFlowContext.jsx'
 import Pagination from '../components/Pagination.jsx'

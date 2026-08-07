@@ -1,18 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import supabase from '../lib/supabaseClient.js'
+import { bookFreeEvent } from '../lib/edgeApi.js'
 import PageTransition from '../components/PageTransition.jsx'
-
-function enforceMobile() {
-  if (typeof window === 'undefined') return
-  const isMobile = window.matchMedia('(pointer:coarse), (max-width: 768px)').matches
-  if (!isMobile) {
-    // stop execution in desktop to avoid exposing console and API calls
-    // developer-intended strict guard
-    // eslint-disable-next-line no-debugger
-    debugger
-  }
-}
 
 export default function PublicCreator() {
   const { username } = useParams()
@@ -23,10 +13,6 @@ export default function PublicCreator() {
   const [message, setMessage] = useState('')
 
   useEffect(() => {
-    enforceMobile()
-  }, [])
-
-  useEffect(() => {
     if (!supabase) {
       setLoading(false)
       return
@@ -35,7 +21,6 @@ export default function PublicCreator() {
     let mounted = true
     ;(async () => {
       try {
-        // creators table expected: username, display_name, bio, theme_color, avatar_url
         const { data: profileData } = await supabase.from('creators').select('*').eq('username', username).single()
         if (mounted) setProfile(profileData)
 
@@ -43,10 +28,11 @@ export default function PublicCreator() {
           .from('live_events')
           .select('*')
           .eq('creator_username', username)
-          .order('when', { ascending: true })
+          .in('status', ['scheduled', 'live'])
+          .order('event_when', { ascending: true })
         if (mounted) setEvents(liveEvents || [])
-      } catch (e) {
-        // ignore — show fallback
+      } catch {
+        // show fallback
       } finally {
         if (mounted) setLoading(false)
       }
@@ -54,7 +40,21 @@ export default function PublicCreator() {
     return () => (mounted = false)
   }, [username])
 
-  if (loading) return <PageTransition><div className="p-6">Loading…</div></PageTransition>
+  async function handleBookEvent(ev) {
+    setMessage('')
+    if (ev.price_type === 'paid') {
+      navigate('/signin', { state: { role: 'user', redirect: window.location.pathname } })
+      return
+    }
+    try {
+      await bookFreeEvent({ event_id: ev.id })
+      setMessage('Booked successfully!')
+    } catch (err) {
+      setMessage(err.message || 'Booking failed')
+    }
+  }
+
+  if (loading) return <PageTransition><div className="p-6">Loading...</div></PageTransition>
 
   if (!profile)
     return (
@@ -71,7 +71,7 @@ export default function PublicCreator() {
       <div className="min-h-screen bg-gradient-to-b from-pink-50 via-white to-violet-50 p-4">
         <div className="max-w-md mx-auto">
           <div className="rounded-2xl overflow-hidden shadow-xl bg-white">
-              <div className="p-6 text-center" style={{ background: profile.theme_color || '#f9f7ff' }}>
+            <div className="p-6 text-center" style={{ background: profile.theme_color || '#f9f7ff' }}>
               {profile.avatar_url ? (
                 <img src={profile.avatar_url} alt="avatar" className="mx-auto h-20 w-20 rounded-full object-cover border-4 border-white shadow" />
               ) : (
@@ -92,27 +92,14 @@ export default function PublicCreator() {
                     <div className="flex items-center justify-between">
                       <div>
                         <div className="font-semibold">{ev.title || 'Live Session'}</div>
-                        <div className="text-xs text-muted">{new Date(ev.when).toLocaleString()}</div>
+                        <div className="text-xs text-muted">{new Date(ev.event_when).toLocaleString()}</div>
                       </div>
                       <div>
                         <button
-                          onClick={async () => {
-                            // if paid, redirect to signin/signup with role=user
-                            if (ev.price_type === 'paid') {
-                              navigate('/signin', { state: { role: 'user', redirect: window.location.pathname } })
-                              return
-                            }
-                            // free booking: create booking row. Must be authenticated to associate user_id.
-                            try {
-                              await supabase.from('bookings').insert({ event_id: ev.id, creator_username: username, user_id: null, status: 'booked' })
-                              setMessage('Booked successfully')
-                            } catch (e) {
-                              setMessage('Booking failed')
-                            }
-                          }}
-                          className="px-3 py-2 rounded bg-violet-600 text-white"
+                          onClick={() => handleBookEvent(ev)}
+                          className="px-3 py-2 rounded bg-violet-600 text-white text-sm"
                         >
-                          {ev.price_type === 'paid' ? `Book Now @ ₹${ev.price}` : 'Book Now'}
+                          {ev.price_type === 'paid' ? `Book Now @ \u20b9${ev.price}` : 'Book Now'}
                         </button>
                       </div>
                     </div>

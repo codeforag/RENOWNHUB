@@ -280,29 +280,29 @@ Adjust policies carefully in Supabase console.
 
 ---
 
-## Payments & webhooks
+## Payments & webhooks (Razorpay)
 
-Recommended pattern for paid events and memberships:
+Implemented via Supabase Edge Functions:
 
-- Create `bookings` row with status `pending`.
-- Create a Stripe Checkout session on a server endpoint (Edge Function or serverless) with booking id and price.
-- Redirect user to Stripe Checkout.
-- Configure Stripe webhook to update `bookings` status to `paid` on successful payment and send confirmation email.
-- Optional: store transaction data in `payments` table.
-
-Supabase Edge Functions are a good place to implement Stripe server-side logic.
+- `create-razorpay-order`: Creates a Razorpay order server-side, validates amount against DB, creates pending booking.
+- `verify-payment`: Verifies Razorpay payment signature (HMAC-SHA256), updates booking status. Supports both webhook (POST) and manual verification (PUT).
+- Razorpay webhook URL: `https://ycsssohaoedyyucldefb.supabase.co/functions/v1/verify-payment`
 
 ---
 
-## AWS Amplify deployment
+## Cloudflare Pages deployment
 
-- Add `amplify.yml` at project root (provided in this repo).
-- In Amplify Console:
-  - Connect repository and branch `main`.
-  - Set environment variables: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, and any Stripe keys for Edge Functions.
-  - Add domain `mallucupid.com` and configure DNS.
+1. Push the repo to GitHub.
+2. In Cloudflare Dashboard → Workers & Pages → Create → Pages → Connect to Git:
+   - **Build command:** `npm run build`
+   - **Build output directory:** `dist`
+   - **Environment variables:**
+     - `VITE_SUPABASE_URL` — your Supabase project URL
+     - `VITE_SUPABASE_ANON_KEY` — your Supabase anon/public key
+3. Custom domain: add `mallucupid.com` in Pages → Custom domains.
 
-Build command is `npm run build` and publish directory is `dist`.
+The `public/_redirects` file handles SPA routing (all paths → `/index.html`).
+The `public/_headers` file sets security headers.
 
 ---
 
@@ -325,8 +325,9 @@ I can implement this helper page next if you'd like.
 - `src/lib/authClient.js` — helpers for sign-up/sign-in (basic)
 - `src/pages/PublicCreator.jsx` — public creator page for shared links (mobile-only)
 - `src/components/LiveModal.jsx` — create live events (writes to `live_events`)
-- `amplify.yml` — Amplify build settings
 - `DOCUMENTATIONS.md` — this file
+- `public/_redirects` — Cloudflare Pages SPA routing
+- `public/_headers` — Security headers
 
 ---
 

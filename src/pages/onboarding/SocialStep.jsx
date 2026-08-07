@@ -4,6 +4,7 @@ import AuthLayout from '../../components/AuthLayout.jsx'
 import PageTransition from '../../components/PageTransition.jsx'
 import TextField from '../../components/TextField.jsx'
 import { useAuthFlow } from '../../context/AuthFlowContext.jsx'
+import { finalizeSignup } from '../../lib/edgeApi.js'
 
 const HANDLE_RE = /^[a-zA-Z0-9_.]{1,30}$/
 
@@ -61,7 +62,7 @@ const FIELDS = [
 
 export default function SocialStep() {
   const navigate = useNavigate()
-  const { categories, socials, update } = useAuthFlow()
+  const { fullName, gender, dob, categories, socials, update } = useAuthFlow()
 
   useEffect(() => {
     if (!categories || categories.length === 0) {
@@ -86,14 +87,14 @@ export default function SocialStep() {
     if (errors[key]) setErrors((prev) => ({ ...prev, [key]: '' }))
   }
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault()
     const nextErrors = {}
     const normalized = { ...values }
 
     for (const field of FIELDS) {
       const raw = values[field.key].trim()
-      if (!raw) continue // every field here is optional
+      if (!raw) continue
       const error = field.validate(raw)
       if (error) {
         nextErrors[field.key] = error
@@ -107,9 +108,21 @@ export default function SocialStep() {
 
     setSubmitting(true)
     update({ socials: normalized })
-    if (typeof window !== 'undefined' && window.innerWidth > 768) {
-      debugger
+
+    // Finalize signup on server: save all onboarding data
+    try {
+      await finalizeSignup({
+        fullName,
+        gender: gender?.toLowerCase() || null,
+        dob: dob || null,
+        categories: categories || [],
+        socials: normalized,
+      })
+    } catch (err) {
+      console.error('Failed to finalize on server:', err)
+      // Still navigate — data is saved in context as fallback
     }
+
     navigate('/dashboard')
   }
 
@@ -143,7 +156,7 @@ export default function SocialStep() {
             disabled={submitting}
             className="w-full rounded-full bg-gold text-bg font-semibold py-3.5 hover:bg-cream transition-colors disabled:opacity-60 mt-2"
           >
-            {submitting ? 'Setting up your page…' : 'Next'}
+            {submitting ? 'Setting up your page...' : 'Next'}
           </button>
         </form>
       </AuthLayout>
