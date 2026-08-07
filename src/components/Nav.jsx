@@ -1,11 +1,7 @@
 import { motion } from 'framer-motion'
 import { Link } from 'react-router-dom'
-import { useState } from 'react'
-import LiveModal from './LiveModal.jsx'
 
 export default function Nav() {
-  const [openLive, setOpenLive] = useState(false)
-
   return (
     <>
       <motion.header
@@ -31,12 +27,6 @@ export default function Nav() {
             </a>
           </div>
           <div className="flex items-center gap-3">
-            <button
-              onClick={() => setOpenLive(true)}
-              className="text-sm font-semibold bg-violet-600 text-white px-3 py-2 rounded-full hover:opacity-95 transition"
-            >
-              Live
-            </button>
             <Link
               to="/signin"
               className="text-sm font-semibold bg-gold text-bg px-4 py-2 rounded-full hover:bg-cream transition-colors"
@@ -46,7 +36,6 @@ export default function Nav() {
           </div>
         </nav>
       </motion.header>
-      <LiveModal open={openLive} onClose={() => setOpenLive(false)} />
     </>
   )
 }
