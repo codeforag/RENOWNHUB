@@ -20,6 +20,43 @@ function Spinner() {
   )
 }
 
+function GreenTickIcon() {
+  return (
+    <svg
+      className="h-5 w-5 text-emerald-400"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-label="Username is available"
+    >
+      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+      <polyline points="22 4 12 14.01 9 11.01" />
+    </svg>
+  )
+}
+
+function RedCrossIcon() {
+  return (
+    <svg
+      className="h-5 w-5 text-coral"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-label="Username is taken"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <line x1="15" y1="9" x2="9" y2="15" />
+      <line x1="9" y1="9" x2="15" y2="15" />
+    </svg>
+  )
+}
+
 export default function SignUp() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -30,9 +67,14 @@ export default function SignUp() {
   const [emailError, setEmailError] = useState('')
   const [username, setUsername] = useState(signupUsername || '')
   const [usernameError, setUsernameError] = useState('')
-  const [usernameStatus, setUsernameStatus] = useState('idle')
+  const [usernameStatus, setUsernameStatus] = useState('idle') // idle | checking | available | taken
   const debounceRef = useRef(null)
   const [submitting, setSubmitting] = useState(false)
+
+  // Terms + age acceptance (required to submit)
+  const [acceptedTerms, setAcceptedTerms] = useState(false)
+  const [acceptedAge, setAcceptedAge] = useState(false)
+  const [termsError, setTermsError] = useState('')
 
   // OTP step state
   const [step, setStep] = useState('form') // form | otp
@@ -77,29 +119,86 @@ export default function SignUp() {
   async function handleSendOtp(e) {
     e?.preventDefault()
     let hasError = false
+
+    // Email validation
     if (!EMAIL_RE.test(email)) {
       setEmailError("That doesn't look like a valid email address.")
       hasError = true
     }
+
+    // Username validation
     if (!USERNAME_RE.test(username)) {
       setUsernameError('3-20 characters: letters, numbers, underscores or dots.')
       hasError = true
     } else if (usernameStatus === 'taken') {
       hasError = true
     } else if (usernameStatus === 'checking') {
-      return
+      return // wait for the check to complete
+    } else if (usernameStatus === 'idle') {
+      // Force a fresh availability check before submit
+      setUsernameStatus('checking')
+      try {
+        const result = await checkUsernameAvailability(username)
+        setUsernameStatus(result.available ? 'available' : 'taken')
+        if (!result.available) {
+          setUsernameError(result.reason || 'This username is already taken.')
+          return
+        }
+      } catch (err) {
+        setUsernameError(`Could not verify username availability: ${err.message}`)
+        return
+      }
     }
+
+    // Terms + age acceptance validation
+    if (!acceptedTerms || !acceptedAge) {
+      setTermsError('You must accept the Terms of Service, Privacy Policy, and confirm you are at least 18 years old to create an account.')
+      hasError = true
+    } else {
+      setTermsError('')
+    }
+
     if (hasError) return
 
     setSubmitting(true)
     try {
-      await sendOtp({ email, purpose: 'signup', role: roleFromState, username })
+      // Send acceptance flags to the backend so they're recorded server-side
+      await sendOtp({
+        email,
+        purpose: 'signup',
+        role: roleFromState,
+        username,
+        acceptedTerms,
+        acceptedAge,
+      })
       window.localStorage.setItem('mallucupid.lastAuthEmail', email)
-      update({ flow: 'signup', signupEmail: email, signupUsername: username, signupRole: roleFromState })
+      update({
+        flow: 'signup',
+        signupEmail: email,
+        signupUsername: username,
+        signupRole: roleFromState,
+        acceptedTerms,
+        acceptedAge,
+      })
       setStep('otp')
       setResendTimer(60)
     } catch (err) {
-      setEmailError(err.message || 'Failed to send OTP')
+      console.error('send-otp signup error:', err)
+      // Map known error codes to specific fields
+      if (err.code === 'username_taken' || err.code === 'username_reserved') {
+        setUsernameError(err.message)
+        setUsernameStatus('taken')
+      } else if (err.code === 'email_already_registered' || err.code === 'email_taken') {
+        setEmailError(err.message)
+      } else if (err.code === 'terms_not_accepted' || err.code === 'age_not_confirmed') {
+        setTermsError(err.message)
+      } else if (err.code === 'rate_limited_per_email') {
+        setEmailError(`Too many codes requested. Please wait ${err.retry_after_seconds || 120} seconds before trying again.`)
+      } else if (err.code === 'rate_limited_global') {
+        setEmailError('Our email service is currently at capacity. Please try again in a few minutes.')
+      } else {
+        setEmailError(err.message || 'Failed to send verification code. Please try again.')
+      }
     } finally {
       setSubmitting(false)
     }
@@ -123,7 +222,6 @@ export default function SignUp() {
           })
           if (sessionErr) {
             console.error('setSession failed after signup:', sessionErr)
-            // Even if session set fails, we still navigate to onboarding (user can sign in)
             setOtpError('Your account was created, but we could not sign you in automatically. Please sign in.')
             return
           }
@@ -147,6 +245,19 @@ export default function SignUp() {
       }
     } catch (err) {
       console.error('signup verify error:', err)
+      // Specific handling for username conflict that happens at verify time
+      // (race condition: another user grabbed the username between OTP-send and OTP-verify)
+      if (err.code === 'username_taken' || err.code === 'username_reserved') {
+        setOtpError(`${err.message} Go back to the form, pick a new username, and try again.`)
+        // Also reset to the form step so they can pick a new username
+        setTimeout(() => {
+          setStep('form')
+          setUsernameStatus('taken')
+          setUsernameError(err.message)
+          setOtp('')
+        }, 2500)
+        return
+      }
       setOtpError(err.message || 'Verification failed. Please check your code and try again.')
     } finally {
       setVerifying(false)
@@ -155,21 +266,48 @@ export default function SignUp() {
 
   async function handleResend() {
     if (resendTimer > 0) return
+    setOtpError('')
     try {
-      await sendOtp({ email, purpose: 'signup', role: roleFromState, username })
+      await sendOtp({
+        email,
+        purpose: 'signup',
+        role: roleFromState,
+        username,
+        acceptedTerms,
+        acceptedAge,
+      })
       setResendTimer(60)
+      setOtpError('A new code has been sent. Check your inbox and spam folder.')
     } catch (err) {
-      setOtpError(err.message || 'Failed to resend')
+      console.error('resend error:', err)
+      if (err.code === 'rate_limited_per_email') {
+        setOtpError(`Too many codes requested. Please wait ${err.retry_after_seconds || 120} seconds.`)
+      } else if (err.code === 'username_taken' || err.code === 'username_reserved') {
+        setOtpError(`${err.message} Go back to the form to pick a new username.`)
+      } else {
+        setOtpError(err.message || 'Could not resend the code. Please try again in a moment.')
+      }
     }
   }
 
+  // Trailing widget for the username field:
+  // - idle: nothing
+  // - checking: spinner
+  // - available: GREEN TICK (large, prominent)
+  // - taken: red cross + "taken" label
   const usernameTrailing =
     usernameStatus === 'checking' ? (
       <Spinner />
     ) : usernameStatus === 'available' ? (
-      <span className="text-xs font-mono text-emerald-400">available</span>
+      <span className="inline-flex items-center gap-1.5">
+        <GreenTickIcon />
+        <span className="text-xs font-mono text-emerald-400">available</span>
+      </span>
     ) : usernameStatus === 'taken' ? (
-      <span className="text-xs font-mono text-coral">taken</span>
+      <span className="inline-flex items-center gap-1.5">
+        <RedCrossIcon />
+        <span className="text-xs font-mono text-coral">taken</span>
+      </span>
     ) : null
 
   // ---- OTP STEP ----
@@ -221,7 +359,7 @@ export default function SignUp() {
       <AuthLayout
         showBack
         backTo="/"
-        eyebrow="Join MALLU CUPID"
+        eyebrow="Join RENOWNHUB"
         title="Create your account"
         subtitle="Free forever. Set up your creator page in minutes."
       >
@@ -245,13 +383,80 @@ export default function SignUp() {
             value={username}
             onChange={(e) => setUsername(e.target.value.trim())}
             error={usernameStatus === 'taken' ? 'That username is already taken.' : usernameError}
-            hint={usernameStatus === 'idle' && !usernameError ? 'This becomes your MALLU CUPID page link.' : undefined}
+            hint={usernameStatus === 'idle' && !usernameError ? 'This becomes your RENOWNHUB page link.' : undefined}
             trailing={usernameTrailing}
           />
 
+          {/* Prominent availability banner (extra feedback when green tick is shown) */}
+          {usernameStatus === 'available' && (
+            <div className="flex items-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-2.5 text-emerald-400">
+              <GreenTickIcon />
+              <span className="text-sm font-medium">
+                Great! <strong className="font-semibold">@{username}</strong> is available.
+              </span>
+            </div>
+          )}
+
+          {/* Terms + Privacy + 18+ acceptance checkboxes */}
+          <div className={`rounded-xl border px-4 py-3.5 space-y-3 ${
+            termsError
+              ? 'border-coral/60 bg-coral/5'
+              : 'border-white/15 bg-white/5'
+          }`}>
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={acceptedTerms}
+                onChange={(e) => {
+                  setAcceptedTerms(e.target.checked)
+                  if (termsError) setTermsError('')
+                }}
+                className="mt-0.5 h-4 w-4 rounded border-white/30 bg-transparent text-gold focus:ring-gold/60"
+              />
+              <span className="text-xs text-muted leading-relaxed">
+                I have read and agree to the{' '}
+                <a
+                  href="/terms"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-gold font-medium hover:text-cream underline underline-offset-2"
+                >
+                  Terms of Service
+                </a>{' '}and{' '}
+                <a
+                  href="/privacy"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-gold font-medium hover:text-cream underline underline-offset-2"
+                >
+                  Privacy Policy
+                </a>.
+              </span>
+            </label>
+
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={acceptedAge}
+                onChange={(e) => {
+                  setAcceptedAge(e.target.checked)
+                  if (termsError) setTermsError('')
+                }}
+                className="mt-0.5 h-4 w-4 rounded border-white/30 bg-transparent text-gold focus:ring-gold/60"
+              />
+              <span className="text-xs text-muted leading-relaxed">
+                I confirm that I am at least <strong className="text-cream">18 years old</strong>.
+                RENOWNHUB is strictly for adults only.
+              </span>
+            </label>
+          </div>
+          {termsError && (
+            <p className="text-xs text-coral -mt-3">{termsError}</p>
+          )}
+
           <button
             type="submit"
-            disabled={submitting || usernameStatus === 'checking'}
+            disabled={submitting || usernameStatus === 'checking' || !acceptedTerms || !acceptedAge}
             className="w-full rounded-full bg-gold text-bg font-semibold py-3.5 hover:bg-cream transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {submitting ? 'Sending OTP...' : 'Continue'}

@@ -129,6 +129,24 @@ Deno.serve(async (req) => {
   // SIGNUP FLOW
   // ============================================================
   if (purpose === "signup") {
+    // ---- DEFENSE-IN-DEPTH: verify terms + age were accepted at OTP-send time ----
+    // Never trust the frontend — even if the SignUp.jsx form is bypassed, the OTP
+    // record must show acceptance.
+    if (!otpRecord.accepted_terms) {
+      return new Response(JSON.stringify({
+        error: "Cannot complete signup: Terms of Service and Privacy Policy were not accepted. Please go back to the signup form, check the boxes, and try again.",
+        code: "terms_not_accepted",
+        field: "acceptedTerms",
+      }), { status: 400, headers: { ...corsHeaders(origin), "Content-Type": "application/json" } });
+    }
+    if (!otpRecord.accepted_age) {
+      return new Response(JSON.stringify({
+        error: "Cannot complete signup: you must confirm you are at least 18 years old. Please go back to the signup form, check the box, and try again.",
+        code: "age_not_confirmed",
+        field: "acceptedAge",
+      }), { status: 400, headers: { ...corsHeaders(origin), "Content-Type": "application/json" } });
+    }
+
     // ---- FINAL USERNAME RE-VERIFICATION (race-condition safe) ----
     if (!username || !isValidUsername(username)) {
       return new Response(JSON.stringify({ error: "Username is missing or invalid. Please restart signup.", code: "invalid_username" }), {
@@ -194,26 +212,66 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ---- CREATE PROFILE ROWS ----
-    const { error: userRowError } = await supabase.from("users").upsert({
+    // ---- CREATE PROFILE ROWS (real INSERT — fails on username conflict) ----
+    // We use INSERT (not upsert) so that the UNIQUE constraint on `username`
+    // actually rejects the row if someone else grabbed the same username
+    // between our availability check and now. The check above is a
+    // best-effort early reject; the DB constraint is the source of truth.
+    const { error: userRowError } = await supabase.from("users").insert({
       user_id: authData.user.id,
       email: normalizedEmail,
       username,
       role,
-    }, { onConflict: 'user_id' });
+      // Persist acceptance flags permanently for audit/legal compliance
+      accepted_terms: true,
+      accepted_age: true,
+      accepted_terms_at: new Date().toISOString(),
+    });
 
     if (userRowError) {
-      console.error("users row upsert error:", userRowError);
-      // Don't fail the whole signup — user can complete profile later
+      console.error("users row insert error:", userRowError);
+      // If it's a username conflict, rollback the auth user we just created
+      // and tell the user to pick a different username.
+      if (
+        userRowError.code === "23505" ||
+        /username/i.test(userRowError.message) ||
+        /duplicate key/i.test(userRowError.message)
+      ) {
+        await supabase.auth.admin.deleteUser(authData.user.id);
+        return new Response(JSON.stringify({
+          error: `This username was just taken by someone else. Please go back, choose a different username, and try again.`,
+          code: "username_taken",
+          field: "username",
+        }), { status: 409, headers: { ...corsHeaders(origin), "Content-Type": "application/json" } });
+      }
+      // For other errors, log but don't block signup — the auth user exists,
+      // they can complete their profile later via /dashboard/profile.
+      console.warn("users insert failed (non-fatal, auth user still created):", userRowError.message);
     }
 
     if (role === "creator" && username) {
-      const { error: creatorRowError } = await supabase.from("creators").upsert({
+      const { error: creatorRowError } = await supabase.from("creators").insert({
         user_id: authData.user.id,
         username,
-      }, { onConflict: 'user_id' });
+      });
       if (creatorRowError) {
-        console.error("creators row upsert error:", creatorRowError);
+        console.error("creators row insert error:", creatorRowError);
+        // If username conflict on creators table, the users table insert above
+        // already succeeded — so we need to clean up BOTH the users row AND the auth user.
+        if (
+          creatorRowError.code === "23505" ||
+          /username/i.test(creatorRowError.message) ||
+          /duplicate key/i.test(creatorRowError.message)
+        ) {
+          await supabase.from("users").delete().eq("user_id", authData.user.id);
+          await supabase.auth.admin.deleteUser(authData.user.id);
+          return new Response(JSON.stringify({
+            error: `This username was just taken by someone else. Please go back, choose a different username, and try again.`,
+            code: "username_taken",
+            field: "username",
+          }), { status: 409, headers: { ...corsHeaders(origin), "Content-Type": "application/json" } });
+        }
+        console.warn("creators insert failed (non-fatal, auth user + users row still created):", creatorRowError.message);
       }
     }
 

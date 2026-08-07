@@ -33,7 +33,7 @@ Deno.serve(async (req) => {
     });
   }
 
-  const { email, purpose = "signin", role, username } = body || {};
+  const { email, purpose = "signin", role, username, acceptedTerms, acceptedAge } = body || {};
 
   // ---- SERVER-SIDE VALIDATION ----
   if (!email) {
@@ -55,6 +55,22 @@ Deno.serve(async (req) => {
   const normalizedEmail = normalizeEmail(email);
 
   if (purpose === "signup") {
+    // ---- TERMS + AGE ACCEPTANCE (required, validated server-side) ----
+    if (acceptedTerms !== true) {
+      return new Response(JSON.stringify({
+        error: "You must accept the Terms of Service and Privacy Policy to create an account.",
+        code: "terms_not_accepted",
+        field: "acceptedTerms",
+      }), { status: 400, headers: { ...corsHeaders(origin), "Content-Type": "application/json" } });
+    }
+    if (acceptedAge !== true) {
+      return new Response(JSON.stringify({
+        error: "You must confirm that you are at least 18 years old to create an account. RENOWNHUB is strictly for adults.",
+        code: "age_not_confirmed",
+        field: "acceptedAge",
+      }), { status: 400, headers: { ...corsHeaders(origin), "Content-Type": "application/json" } });
+    }
+
     if (!username) {
       return new Response(JSON.stringify({ error: "Username is required to create an account.", code: "missing_username", field: "username" }), {
         status: 400, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
@@ -215,6 +231,12 @@ Deno.serve(async (req) => {
     verified: false,
     expires_at: expiresAt,
     max_attempts: 5,
+    // Audit: record terms + age acceptance at the time the OTP was issued
+    accepted_terms: purpose === "signup" ? Boolean(acceptedTerms) : false,
+    accepted_age: purpose === "signup" ? Boolean(acceptedAge) : false,
+    accepted_terms_at: purpose === "signup" && acceptedTerms && acceptedAge
+      ? new Date().toISOString()
+      : null,
   });
 
   if (insertError) {

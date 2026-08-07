@@ -179,6 +179,19 @@ Deno.serve(async (req) => {
 
     if (error) {
       console.error("creator update error:", error);
+      // Handle race condition: another user grabbed the username between
+      // our availability check and this UPDATE. The UNIQUE constraint rejects it.
+      if (
+        error.code === "23505" ||
+        /username/i.test(error.message) ||
+        /duplicate key/i.test(error.message)
+      ) {
+        return new Response(JSON.stringify({
+          error: "This username was just taken by someone else. Please choose another and try again.",
+          code: "username_taken",
+          field: "username",
+        }), { status: 409, headers: { ...corsHeaders(origin), "Content-Type": "application/json" } });
+      }
       return new Response(JSON.stringify({ error: `Failed to update creator profile: ${error.message}. Please try again.`, code: "update_failed" }), {
         status: 500, headers: { ...corsHeaders(origin), "Content-Type": "application/json" },
       });
@@ -187,14 +200,35 @@ Deno.serve(async (req) => {
 
   // ---- SYNC display_name to users table ----
   if (display_name !== undefined) {
-    await supabase.from("users").update({ display_name: display_name.trim() }).eq("user_id", user.id);
+    const { error: userSyncErr } = await supabase.from("users").update({ display_name: display_name.trim() }).eq("user_id", user.id);
+    if (userSyncErr) {
+      console.warn("users.display_name sync failed (non-fatal):", userSyncErr.message);
+    }
   }
-  // ---- SYNC username to users table ----
+  // ---- SYNC username to users table (race-condition safe) ----
   if (finalUsername !== undefined) {
-    await supabase.from("users").update({ username: finalUsername }).eq("user_id", user.id);
-    // Also update creator_username on all their live_events + posts
-    await supabase.from("live_events").update({ creator_username: finalUsername }).eq("creator_user_id", user.id);
-    await supabase.from("posts").update({ creator_username: finalUsername }).eq("creator_user_id", user.id);
+    const { error: userSyncErr } = await supabase.from("users").update({ username: finalUsername }).eq("user_id", user.id);
+    if (userSyncErr) {
+      console.error("users.username sync error:", userSyncErr);
+      if (
+        userSyncErr.code === "23505" ||
+        /username/i.test(userSyncErr.message) ||
+        /duplicate key/i.test(userSyncErr.message)
+      ) {
+        // Rollback the creators.username update so the two tables stay in sync
+        await supabase.from("creators").update({ username: userData.username }).eq("user_id", user.id);
+        return new Response(JSON.stringify({
+          error: "This username was just taken by someone else. Please choose another and try again.",
+          code: "username_taken",
+          field: "username",
+        }), { status: 409, headers: { ...corsHeaders(origin), "Content-Type": "application/json" } });
+      }
+      console.warn("users.username sync failed (non-fatal):", userSyncErr.message);
+    } else {
+      // Also update creator_username on all their live_events + posts (best-effort)
+      await supabase.from("live_events").update({ creator_username: finalUsername }).eq("creator_user_id", user.id);
+      await supabase.from("posts").update({ creator_username: finalUsername }).eq("creator_user_id", user.id);
+    }
   }
 
   await logActivity(supabase, {
